@@ -271,12 +271,25 @@ try {
     Get-CoreIsolationStatus
     Get-ScanInformation
     
-    # Footer
-    Write-Host "`n" -NoNewline
-    Write-Host ("─" * 60) -ForegroundColor DarkGray
-    Write-Host "  Script last edited: " -NoNewline -ForegroundColor Gray
-    Write-Host "2025-10-27 by Sonnet 4.5" -ForegroundColor White
-    Write-Host ""
+   # Footer: print local date/time like "Script last edited: 2025-10-27 10:14 AM PDT by ChatGPT"
+   $now = Get-Date
+   $localDate = $now.ToString('yyyy-MM-dd')
+   $localTime = $now.ToString('hh:mm tt')
+   $tz = Get-TimeZone
+
+   if ($tz.Id -match 'UTC') {
+    $tzAbbr = 'UTC'
+   } else {
+       $tzName = if ([System.TimeZoneInfo]::Local.IsDaylightSavingTime($now)) { $tz.DaylightName } else { $tz.StandardName }
+       $clean = ($tzName -replace '[^A-Za-z\s]','').Trim()
+       $tzAbbr = ($clean -split '\s+' | ForEach-Object { $_.Substring(0,1).ToUpper() }) -join ''
+   }
+
+   Write-Host "`n" -NoNewline
+   Write-Host ("─" * 60) -ForegroundColor DarkGray
+   Write-Host "  Script last edited: " -NoNewline -ForegroundColor Gray
+   Write-Host "$localDate $localTime $tzAbbr by ChatGPT" -ForegroundColor White
+   Write-Host ""
     
 } catch {
     Write-Host "`n[ERROR] " -NoNewline -ForegroundColor Red
