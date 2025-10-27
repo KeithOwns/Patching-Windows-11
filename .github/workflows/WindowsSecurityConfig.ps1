@@ -37,12 +37,19 @@ function Get-DefenderStatus {
     $preferences = Get-MpPreference
     $realTimeOff = $preferences.DisableRealtimeMonitoring
 
+    # Real-time protection (always shown)
     Write-StatusIcon (!$realTimeOff)
     Write-Host "Real-time protection" -ForegroundColor White
-    
-    Write-StatusIcon (!$preferences.DisableDevDriveScanning)
-    Write-Host "Dev Drive protection" -ForegroundColor White
-    
+
+    # Only show Dev Drive protection and Controlled folder access when Real-time protection is enabled
+    if (-not $realTimeOff) {
+        Write-StatusIcon (!$preferences.DisableDevDriveScanning)
+        Write-Host "Dev Drive protection" -ForegroundColor White
+
+        Write-StatusIcon ($preferences.EnableControlledFolderAccess -eq 1)
+        Write-Host "Controlled folder access" -ForegroundColor White
+    }
+
     Write-StatusIcon ($preferences.MAPSReporting -ne 0)
     Write-Host "Cloud-delivered protection" -ForegroundColor White
 
@@ -60,9 +67,6 @@ function Get-DefenderStatus {
         Write-Host " ? " -NoNewline -ForegroundColor Yellow
         Write-Host "Tamper protection (Unable to determine)" -ForegroundColor Gray
     }
-
-    Write-StatusIcon ($preferences.EnableControlledFolderAccess -eq 1)
-    Write-Host "Controlled folder access" -ForegroundColor White
 }
 
 function Get-AccountProtection {
@@ -98,29 +102,60 @@ function Get-AccountProtection {
 function Get-FirewallStatus {
     Write-SectionHeader "Firewall & network protection" "🔥"
 
-    # Helper to print profile state
-    function Print-FirewallProfile($Name, $DisplayName) {
-        try {
-            $profile = Get-NetFirewallProfile -Name $Name -ErrorAction Stop
-            Write-StatusIcon $profile.Enabled
-            Write-Host "$DisplayName network" -ForegroundColor White
-        } catch {
-            Write-Host " ? " -NoNewline -ForegroundColor Yellow
-            Write-Host "$DisplayName network (Unable to determine)" -ForegroundColor Gray
-        }
+    # Helper to get profile object safely
+    function Get-Profile($Name) {
+        try { return Get-NetFirewallProfile -Name $Name -ErrorAction Stop } catch { return $null }
     }
 
-    Print-FirewallProfile -Name Domain -DisplayName "Domain"
-    Print-FirewallProfile -Name Private -DisplayName "Private"
-    Print-FirewallProfile -Name Public -DisplayName "Public"
+    $domainProfile  = Get-Profile -Name Domain
+    $privateProfile = Get-Profile -Name Private
+    $publicProfile  = Get-Profile -Name Public
 
-    # Get Active networks
+    # Print each profile state using icons
+    if ($domainProfile) {
+        Write-StatusIcon $domainProfile.Enabled
+        Write-Host "Domain network" -ForegroundColor White
+    } else {
+        Write-Host " ? Domain network (Unable to determine)" -ForegroundColor Gray
+    }
+
+    if ($privateProfile) {
+        Write-StatusIcon $privateProfile.Enabled
+        Write-Host "Private network" -ForegroundColor White
+    } else {
+        Write-Host " ? Private network (Unable to determine)" -ForegroundColor Gray
+    }
+
+    if ($publicProfile) {
+        Write-StatusIcon $publicProfile.Enabled
+        Write-Host "Public network" -ForegroundColor White
+    } else {
+        Write-Host " ? Public network (Unable to determine)" -ForegroundColor Gray
+    }
+
+    # Determine which profiles have the firewall enabled
+    $activeProfiles = @()
+    if ($domainProfile -and $domainProfile.Enabled)  { $activeProfiles += 'Domain' }
+    if ($privateProfile -and $privateProfile.Enabled) { $activeProfiles += 'Private' }
+    if ($publicProfile -and $publicProfile.Enabled)  { $activeProfiles += 'Public' }
+
+    # Print consolidated active-profile summary
+    if ($activeProfiles.Count -gt 0) {
+        $list = $activeProfiles -join ', '
+        Write-Host "`n  Firewall active on: " -NoNewline -ForegroundColor Gray
+        Write-Host $list -ForegroundColor White
+    } else {
+        Write-Host "`n  Firewall active on: " -NoNewline -ForegroundColor Gray
+        Write-Host "None" -ForegroundColor Yellow
+    }
+
+    # Show active network names
     try {
-        $activeProfiles = Get-NetConnectionProfile -ErrorAction Stop
-        if ($activeProfiles) {
+        $activeConnections = Get-NetConnectionProfile -ErrorAction Stop
+        if ($activeConnections) {
             Write-Host "`n   Active networks:" -ForegroundColor DarkGray
-            foreach ($profile in $activeProfiles) {
-                Write-Host "   • $($profile.Name)" -ForegroundColor Gray
+            foreach ($profile in $activeConnections) {
+                Write-Host "   • $($profile.Name) ($($profile.NetworkCategory))" -ForegroundColor Gray
             }
         }
     } catch { }
@@ -271,25 +306,25 @@ try {
     Get-CoreIsolationStatus
     Get-ScanInformation
     
-   # Footer: print local date/time like "Script last edited: 2025-10-27 10:14 AM PDT by ChatGPT"
-   $now = Get-Date
-   $localDate = $now.ToString('yyyy-MM-dd')
-   $localTime = $now.ToString('hh:mm tt')
-   $tz = Get-TimeZone
+    # Footer: print local date/time like "Script last edited: 2025-10-27 10:14 AM PDT by ChatGPT"
+    $now = Get-Date
+    $localDate = $now.ToString('yyyy-MM-dd')
+    $localTime = $now.ToString('hh:mm tt')
+    $tz = Get-TimeZone
 
-   if ($tz.Id -match 'UTC') {
-    $tzAbbr = 'UTC'
-   } else {
-       $tzName = if ([System.TimeZoneInfo]::Local.IsDaylightSavingTime($now)) { $tz.DaylightName } else { $tz.StandardName }
-       $clean = ($tzName -replace '[^A-Za-z\s]','').Trim()
-       $tzAbbr = ($clean -split '\s+' | ForEach-Object { $_.Substring(0,1).ToUpper() }) -join ''
-   }
+    if ($tz.Id -match 'UTC') {
+        $tzAbbr = 'UTC'
+    } else {
+        $tzName = if ([System.TimeZoneInfo]::Local.IsDaylightSavingTime($now)) { $tz.DaylightName } else { $tz.StandardName }
+        $clean = ($tzName -replace '[^A-Za-z\s]','').Trim()
+        $tzAbbr = ($clean -split '\s+' | ForEach-Object { $_.Substring(0,1).ToUpper() }) -join ''
+    }
 
-   Write-Host "`n" -NoNewline
-   Write-Host ("─" * 60) -ForegroundColor DarkGray
-   Write-Host "  Script last edited: " -NoNewline -ForegroundColor Gray
-   Write-Host "$localDate $localTime $tzAbbr by ChatGPT" -ForegroundColor White
-   Write-Host ""
+    Write-Host "`n" -NoNewline
+    Write-Host ("─" * 60) -ForegroundColor DarkGray
+    Write-Host "  Script last edited: " -NoNewline -ForegroundColor Gray
+    Write-Host "$localDate $localTime $tzAbbr by ChatGPT" -ForegroundColor White
+    Write-Host ""
     
 } catch {
     Write-Host "`n[ERROR] " -NoNewline -ForegroundColor Red
