@@ -72,14 +72,53 @@ function Get-DefenderStatus {
 function Get-AccountProtection {
     Write-SectionHeader "Account protection" "👤"
 
-    # Windows Hello Logic
-    $helloConfigured = $false
+    # --- New Windows Hello Logic ---
+    $pinEnabled = $false
+    $faceEnabled = $false
+    $fingerprintEnabled = $false
+    $userSID = ""
+
     try {
-        $accountInfo = Get-ChildItem -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WinBio\AccountInfo" -ErrorAction Stop
-        if ($accountInfo.Count -gt 0) { $helloConfigured = $true }
+        $userSID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    } catch {
+         # If we can't get SID, we can't check biometrics.
+         # We can still check for PIN.
+    }
+
+    # 1. Check for PIN
+    # Check for user's AAD/NGC registration key. This is a common
+    # check for a user-configured PIN or Hello setup.
+    try {
+        $helloKey = "HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\WorkplaceJoin\AADNGC"
+        if (Test-Path -Path $helloKey -ErrorAction SilentlyContinue) {
+            $pinEnabled = $true
+        }
     } catch { }
+    
+    # 2. Check for Biometrics (Face/Fingerprint)
+    $enrolledFactors = 0
+    if ($userSID) {
+        try { 
+            $enrolledFactors = Get-ItemPropertyValue -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WinBio\AccountInfo\$userSID" -Name "EnrolledFactors" -ErrorAction SilentlyContinue 
+        } catch { }
+    }
+    
+    # EnrolledFactors is a bitmask: 1=Fingerprint, 2=Face
+    if (($enrolledFactors -band 1) -eq 1) {
+        $fingerprintEnabled = $true
+    }
+    if (($enrolledFactors -band 2) -eq 2) {
+        $faceEnabled = $true
+    }
+
+    # 3. Final Check
+    # Hello is considered "configured" if ANY of the three are set up.
+    $helloConfigured = $pinEnabled -or $faceEnabled -or $fingerprintEnabled
+    
     Write-StatusIcon $helloConfigured
     Write-Host "Windows Hello" -ForegroundColor White
+    # --- End New Windows Hello Logic ---
+
 
     # Dynamic Lock Logic
     $dynamicLockEnabled = $false
@@ -91,11 +130,8 @@ function Get-AccountProtection {
     Write-Host "Dynamic lock" -ForegroundColor White
 
     # Facial Recognition Logic
-    $userSID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    $enrolledFactors = 0
-    try { $enrolledFactors = Get-ItemPropertyValue -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WinBio\AccountInfo\$userSID" -Name "EnrolledFactors" -ErrorAction SilentlyContinue } catch { }
-    
-    Write-StatusIcon ($enrolledFactors -eq 2)
+    # We can just reuse the $faceEnabled variable from the check above.
+    Write-StatusIcon ($faceEnabled)
     Write-Host "Facial recognition" -ForegroundColor White
 }
 
@@ -140,14 +176,14 @@ function Get-FirewallStatus {
     if ($publicProfile -and $publicProfile.Enabled)  { $activeProfiles += 'Public' }
 
     # Print consolidated active-profile summary
-    if ($activeProfiles.Count -gt 0) {
-        $list = $activeProfiles -join ', '
-        Write-Host "`n  Firewall active on: " -NoNewline -ForegroundColor Gray
-        Write-Host $list -ForegroundColor White
-    } else {
-        Write-Host "`n  Firewall active on: " -NoNewline -ForegroundColor Gray
-        Write-Host "None" -ForegroundColor Yellow
-    }
+    # if ($activeProfiles.Count -gt 0) {
+    #     $list = $activeProfiles -join ', '
+    #     Write-Host "`n  Firewall active on: " -NoNewline -ForegroundColor Gray
+    #     Write-Host $list -ForegroundColor White
+    # } else {
+    #     Write-Host "`n  Firewall active on: " -NoNewline -ForegroundColor Gray
+    #     Write-Host "None" -ForegroundColor Yellow
+    # }
 
     # Show active network names
     try {
@@ -196,9 +232,9 @@ function Get-ReputationProtection {
     Write-StatusIcon ($phishNotifyUnsafeStorage -ne 0)
     Write-Host "Warn about unsafe password storage" -ForegroundColor White
 
-    $phishServiceCollection = Get-RegValue -Path "HKCU:\Software\Microsoft\PhishingProtection" -Name "ServiceCollection" -DefaultValue 1
-    Write-StatusIcon ($phishServiceCollection -ne 0)
-    Write-Host "Automatically collect content for analysis" -ForegroundColor White
+    # $phishServiceCollection = Get-RegValue -Path "HKCU:\Software\Microsoft\PhishingProtection" -Name "ServiceCollection" -DefaultValue 1
+    # Write-StatusIcon ($phishServiceCollection -ne 0)
+    # Write-Host "Automatically collect content for analysis" -ForegroundColor White
 
     # Potentially unwanted app blocking
     Write-Host "`n  Potentially unwanted app blocking" -ForegroundColor Cyan
@@ -306,7 +342,7 @@ try {
     Get-CoreIsolationStatus
     Get-ScanInformation
     
-    # Footer: print local date/time like "Script last edited: 2025-10-27 10:14 AM PDT by ChatGPT"
+    # Footer: print local date/time like "Script last edited: 2025-10-27 10:14 AM PDT by Gemini 2.5 Pro"
     $now = Get-Date
     $localDate = $now.ToString('yyyy-MM-dd')
     $localTime = $now.ToString('hh:mm tt')
@@ -323,7 +359,7 @@ try {
     Write-Host "`n" -NoNewline
     Write-Host ("─" * 60) -ForegroundColor DarkGray
     Write-Host "  Script last edited: " -NoNewline -ForegroundColor Gray
-    Write-Host "$localDate $localTime $tzAbbr by ChatGPT" -ForegroundColor White
+    Write-Host "$localDate $localTime $tzAbbr by Gemini 2.5 Pro" -ForegroundColor White
     Write-Host ""
     
 } catch {
