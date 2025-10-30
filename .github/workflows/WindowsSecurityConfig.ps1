@@ -1,369 +1,411 @@
-#Requires -RunAsAdministrator
-
 <#
 .SYNOPSIS
-    Checks current Windows Defender Virus & Threat Protection settings
+    PowerShell Script Scaffold - A reusable template for creating well-structured PowerShell scripts.
 .DESCRIPTION
-    Retrieves and displays all Virus & threat protection configurations with Windows Security styling
+    This scaffold provides a professional foundation for PowerShell scripts with built-in logging,
+    formatted status output using color-coded symbols, and robust error handling. It includes:
+    - Automatic transcript logging with timestamps
+    - Write-StatusLine function with [+] (success), [-] (failed), [!] (warning) symbols
+    - Try/catch/finally error handling
+    - Professional header and footer output
+    Replace the sample script logic with your own code to create production-ready scripts.
+.PARAMETER LogDirectory
+    Specifies a custom directory to store the log files.
+    Defaults to the current user's Downloads folder ($env:USERPROFILE\Downloads).
+.PARAMETER ShowDemo
+    When present, displays sample output demonstrating the Write-StatusLine formatting.
+    Omit this parameter in production to suppress demo output.
+.EXAMPLE
+    .\PowerShellscriptSCAFFOLD.ps1
+    Runs the script with default parameters, logging to the user's Downloads folder.
+.EXAMPLE
+    .\PowerShellscriptSCAFFOLD.ps1 -LogDirectory "C:\Logs"
+    Runs the script and stores the resulting log file in "C:\Logs".
+.EXAMPLE
+    .\PowerShellscriptSCAFFOLD.ps1 -ShowDemo
+    Runs the script and displays sample formatted output.
 .NOTES
-    Requires Administrator privileges
+    Author:      Keith Tibbitts
+    Created:     2025-10-29
+    Version:     2.14
+    
+    Status Symbol Legend:
+    [+] = Success/Positive (Green)
+    [-] = Failed/Negative (Red)
+    [!] = Warning/Note (Yellow)
+    [?] = Unknown (Gray)
 #>
 
-function Get-RegValue($Path, $Name, $DefaultValue) {
-    try { return Get-ItemPropertyValue -Path $Path -Name $Name -ErrorAction Stop }
-    catch { return $DefaultValue }
+[CmdletBinding()]
+param (
+    # Default is set to empty; we assign the real default inside the script.
+    [string]$LogDirectory = "",
+    
+    # Show demo output
+    [switch]$ShowDemo
+)
+
+# --- Sigma Requirement: Formatting Function & Output Standards ---
+# This requirement includes:
+# 1. Write-StatusLine function for consistent formatted output
+# 2. Use of common abbreviations in script output to maximize space within the 98-character description limit
+# 3. Text wrapping rules: When multi-line text is needed, break lines at natural word boundaries.
+#    Never split words across lines. Ensure each line is a complete phrase for readability.
+# 4. Warning status details: When a [!] status is generated and additional information is available,
+#    display it concisely to the right of the [!] symbol. Format: "[!] - Additional info"
+#    Example: "[!] - Under 85%" or "[!] - Needs update"
+# 5. Section headings: All section headings in script output should be displayed in Blue color.
+#    Example: Write-Host "System Health Checks:" -ForegroundColor Blue
+#
+# Common abbreviations to use:
+# - "config" or "cfg" instead of "configuration"
+# - "svc" instead of "service"
+# - "conn" instead of "connection"
+# - "msg" instead of "message"
+# - "info" instead of "information"
+# - "cert" instead of "certificate"
+# - "auth" instead of "authentication"
+# - "admin" instead of "administrator"
+# - "privs" instead of "privileges"
+# - "exec" instead of "execution"
+# - "log" instead of "logging"
+# - "ver" instead of "version"
+# - "PS" instead of "PowerShell" (except in titles)
+# - "avail" instead of "available"
+# - "temp" instead of "temporary"
+# - "max" instead of "maximum"
+# - "min" instead of "minimum"
+# - "def" instead of "default"
+# - "mgmt" instead of "management"
+# - "perm" instead of "permission"
+# - "proc" instead of "process"
+# - "req" instead of "required/requirement"
+# - Use standard tech abbreviations: RAM, CPU, DNS, IP, URL, API, etc.
+
+function Write-StatusLine {
+    <#
+    .SYNOPSIS
+        Writes a line with a left-justified description and an aligned, colored status.
+    .DESCRIPTION
+        Formats output with a description, dotted padding, and a colored status indicator.
+        Supports both symbolic and text status values:
+        - [+] = Success/Positive (Green)
+        - [-] = Failed/Negative (Red)  
+        - [!] = Warning/Note (Yellow)
+        - [?] = Unknown (Gray)
+        - Text values like "OK", "Active", "Failed", "Warning" are also supported
+        
+        SIGMA REQUIREMENT: 
+        - Use common abbreviations in descriptions to stay within limits
+        - Status symbols positioned at 50 characters (preferred) or up to 67 characters (max)
+        - Keep descriptions concise for optimal readability
+        - Warning details: For [!] status, append additional info after the symbol: "[!] - Details"
+        Examples: "svc" (service), "config" (configuration), "conn" (connection), "auth" (authentication)
+    .PARAMETER Description
+        The description text (max 60 characters, will be truncated if longer)
+    .PARAMETER Status
+        The status indicator (max 10 characters, will be truncated if longer)
+        For warnings with details, use format: "[!] - Additional info"
+    .EXAMPLE
+        Write-StatusLine -Description "Windows Update svc status" -Status "[+]"
+        Write-StatusLine -Description "Network conn test" -Status "[-]"
+        Write-StatusLine -Description "Disk space warning (C: drive)" -Status "[!] - Under 85%"
+        Write-StatusLine -Description "Unknown state" -Status "[?]"
+        Write-StatusLine -Description "Disk space warning (C: drive)" -Status "[!]"
+        Write-StatusLine -Description "Unknown state" -Status "[?]"
+    #>
+    [CmdletBinding()]
+    param (
+        [string]$Description,
+        [string]$Status
+    )
+
+    # --- EDIT: Clip (truncate) Description and Status to new limits ---
+    $MaxDescLength = 60  # Max description before status (allowing for spacing to 67)
+    $MaxStatusLength = 20  # Increased to accommodate warning details: "[!] - Additional info"
+
+    if ($Description.Length -gt $MaxDescLength) {
+        $Description = $Description.Substring(0, $MaxDescLength)
+    }
+    if ($Status.Length -gt $MaxStatusLength) {
+        $Status = $Status.Substring(0, $MaxStatusLength)
+    }
+
+    $PreferredIndent = 50  # Preferred position for status symbols
+    $MaxIndent = 67        # Maximum position for status symbols
+    $FillerChar = "."
+    
+    # Calculate padding based on description length
+    # If description is short, use preferred indent (50)
+    # If description is longer, use up to max indent (67)
+    if ($Description.Length -lt $PreferredIndent) {
+        $TargetIndent = $PreferredIndent
+    }
+    elseif ($Description.Length -lt $MaxIndent) {
+        $TargetIndent = $MaxIndent
+    }
+    else {
+        $TargetIndent = $Description.Length + 1
+    }
+    $PaddingWidth = $TargetIndent - $Description.Length
+    
+    if ($PaddingWidth -lt 1) { 
+        # This handles cases where $Description is exactly 98 or 99 chars
+        $PaddingWidth = 1 
+    }
+    
+    $Padding = $FillerChar * $PaddingWidth
+    # --- End of padding logic ---
+
+    # Define status words and their colors
+    $PositiveWords = "on", "active", "configured", "complete", "successful", "finish", "finished", "ok"
+    $NegativeWords = "off", "inactive", "failed", "error", "incomplete", "not found"
+    $WarningWords = "warning"
+    $UnknownWords = "unknown"
+
+    $Color = "White" # Default
+    
+    # Check if status starts with a symbol
+    if ($Status -match '^\[\+\]') {
+        $Color = "Green"
+    }
+    elseif ($Status -match '^\[-\]') {
+        $Color = "Red"
+    }
+    elseif ($Status -match '^\[!\]') {
+        $Color = "Yellow"
+    }
+    elseif ($Status -match '^\[\?\]') {
+        $Color = "Gray"
+    }
+    # Otherwise check text-based status
+    elseif ($PositiveWords -contains $Status.ToLower()) {
+        $Color = "Green"
+    }
+    elseif ($NegativeWords -contains $Status.ToLower()) {
+        $Color = "Red"
+    }
+    elseif ($WarningWords -contains $Status.ToLower()) {
+        $Color = "Yellow"
+    }
+    elseif ($UnknownWords -contains $Status.ToLower()) {
+        $Color = "Gray"
+    }
+
+    # Write the formatted line with colored padding and status
+    Write-Host $Description -NoNewline
+    Write-Host $Padding -ForegroundColor $Color -NoNewline
+    Write-Host $Status -ForegroundColor $Color
 }
 
-function Write-StatusIcon($IsEnabled) {
-    if ($IsEnabled) {
-        Write-Host " " -NoNewline -BackgroundColor DarkCyan -ForegroundColor Black
-        Write-Host "✓" -NoNewline -BackgroundColor DarkCyan -ForegroundColor Black
-        Write-Host " " -NoNewline -BackgroundColor DarkCyan -ForegroundColor Black
-        Write-Host " " -NoNewline
-    } else {
-        Write-Host " ✗ " -NoNewline -ForegroundColor Red
-    }
+
+# --- Alpha Requirement: Robust Logging ---
+
+# Set default Log Directory using the $env:USERPROFILE variable
+if ([string]::IsNullOrEmpty($LogDirectory)) {
+    $LogDirectory = Join-Path -Path $env:USERPROFILE -ChildPath 'Downloads'
 }
 
-function Write-SectionHeader($Title, $Icon = "🛡️") {
-    Write-Host "`n$Icon " -NoNewline -ForegroundColor Cyan
-    Write-Host $Title -ForegroundColor White
-    Write-Host ("─" * 60) -ForegroundColor DarkGray
-}
-
-function Get-DefenderStatus {
-    Write-SectionHeader "Virus & threat protection" "🛡️"
-
-    $preferences = Get-MpPreference
-    $realTimeOff = $preferences.DisableRealtimeMonitoring
-
-    # Real-time protection (always shown)
-    Write-StatusIcon (!$realTimeOff)
-    Write-Host "Real-time protection" -ForegroundColor White
-
-    # Only show Dev Drive protection and Controlled folder access when Real-time protection is enabled
-    if (-not $realTimeOff) {
-        Write-StatusIcon (!$preferences.DisableDevDriveScanning)
-        Write-Host "Dev Drive protection" -ForegroundColor White
-
-        Write-StatusIcon ($preferences.EnableControlledFolderAccess -eq 1)
-        Write-Host "Controlled folder access" -ForegroundColor White
-    }
-
-    Write-StatusIcon ($preferences.MAPSReporting -ne 0)
-    Write-Host "Cloud-delivered protection" -ForegroundColor White
-
-    $ssc = $preferences.SubmitSamplesConsent
-    Write-StatusIcon ($ssc -ne 0)
-    Write-Host "Automatic sample submission" -ForegroundColor White
-
-    # Tamper Protection
-    try {
-        $tamperProtection = Get-ItemPropertyValue -Path "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features" -Name "TamperProtection" -ErrorAction Stop
-        $tamperEnabled = ($tamperProtection -eq 1 -or $tamperProtection -eq 5)
-        Write-StatusIcon $tamperEnabled
-        Write-Host "Tamper protection" -ForegroundColor White
-    } catch {
-        Write-Host " ? " -NoNewline -ForegroundColor Yellow
-        Write-Host "Tamper protection (Unable to determine)" -ForegroundColor Gray
-    }
-}
-
-function Get-AccountProtection {
-    Write-SectionHeader "Account protection" "👤"
-
-    # --- New Windows Hello Logic ---
-    $pinEnabled = $false
-    $faceEnabled = $false
-    $fingerprintEnabled = $false
-    $userSID = ""
-
-    try {
-        $userSID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    } catch {
-         # If we can't get SID, we can't check biometrics.
-         # We can still check for PIN.
-    }
-
-    # 1. Check for PIN
-    # Check for user's AAD/NGC registration key. This is a common
-    # check for a user-configured PIN or Hello setup.
-    try {
-        $helloKey = "HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\WorkplaceJoin\AADNGC"
-        if (Test-Path -Path $helloKey -ErrorAction SilentlyContinue) {
-            $pinEnabled = $true
-        }
-    } catch { }
-    
-    # 2. Check for Biometrics (Face/Fingerprint)
-    $enrolledFactors = 0
-    if ($userSID) {
-        try { 
-            $enrolledFactors = Get-ItemPropertyValue -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WinBio\AccountInfo\$userSID" -Name "EnrolledFactors" -ErrorAction SilentlyContinue 
-        } catch { }
-    }
-    
-    # EnrolledFactors is a bitmask: 1=Fingerprint, 2=Face
-    if (($enrolledFactors -band 1) -eq 1) {
-        $fingerprintEnabled = $true
-    }
-    if (($enrolledFactors -band 2) -eq 2) {
-        $faceEnabled = $true
-    }
-
-    # 3. Final Check
-    # Hello is considered "configured" if ANY of the three are set up.
-    $helloConfigured = $pinEnabled -or $faceEnabled -or $fingerprintEnabled
-    
-    Write-StatusIcon $helloConfigured
-    Write-Host "Windows Hello" -ForegroundColor White
-    # --- End New Windows Hello Logic ---
-
-
-    # Dynamic Lock Logic
-    $dynamicLockEnabled = $false
-    try {
-        $dynamicLock = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "EnableGoodbye" -ErrorAction Stop
-        if ($dynamicLock -eq 1) { $dynamicLockEnabled = $true }
-    } catch { }
-    Write-StatusIcon $dynamicLockEnabled
-    Write-Host "Dynamic lock" -ForegroundColor White
-
-    # Facial Recognition Logic
-    # We can just reuse the $faceEnabled variable from the check above.
-    Write-StatusIcon ($faceEnabled)
-    Write-Host "Facial recognition" -ForegroundColor White
-}
-
-function Get-FirewallStatus {
-    Write-SectionHeader "Firewall & network protection" "🔥"
-
-    # Helper to get profile object safely
-    function Get-Profile($Name) {
-        try { return Get-NetFirewallProfile -Name $Name -ErrorAction Stop } catch { return $null }
-    }
-
-    $domainProfile  = Get-Profile -Name Domain
-    $privateProfile = Get-Profile -Name Private
-    $publicProfile  = Get-Profile -Name Public
-
-    # Print each profile state using icons
-    if ($domainProfile) {
-        Write-StatusIcon $domainProfile.Enabled
-        Write-Host "Domain network" -ForegroundColor White
-    } else {
-        Write-Host " ? Domain network (Unable to determine)" -ForegroundColor Gray
-    }
-
-    if ($privateProfile) {
-        Write-StatusIcon $privateProfile.Enabled
-        Write-Host "Private network" -ForegroundColor White
-    } else {
-        Write-Host " ? Private network (Unable to determine)" -ForegroundColor Gray
-    }
-
-    if ($publicProfile) {
-        Write-StatusIcon $publicProfile.Enabled
-        Write-Host "Public network" -ForegroundColor White
-    } else {
-        Write-Host " ? Public network (Unable to determine)" -ForegroundColor Gray
-    }
-
-    # Determine which profiles have the firewall enabled
-    $activeProfiles = @()
-    if ($domainProfile -and $domainProfile.Enabled)  { $activeProfiles += 'Domain' }
-    if ($privateProfile -and $privateProfile.Enabled) { $activeProfiles += 'Private' }
-    if ($publicProfile -and $publicProfile.Enabled)  { $activeProfiles += 'Public' }
-
-    # Print consolidated active-profile summary
-    # if ($activeProfiles.Count -gt 0) {
-    #     $list = $activeProfiles -join ', '
-    #     Write-Host "`n  Firewall active on: " -NoNewline -ForegroundColor Gray
-    #     Write-Host $list -ForegroundColor White
-    # } else {
-    #     Write-Host "`n  Firewall active on: " -NoNewline -ForegroundColor Gray
-    #     Write-Host "None" -ForegroundColor Yellow
-    # }
-
-    # Show active network names
-    try {
-        $activeConnections = Get-NetConnectionProfile -ErrorAction Stop
-        if ($activeConnections) {
-            Write-Host "`n   Active networks:" -ForegroundColor DarkGray
-            foreach ($profile in $activeConnections) {
-                Write-Host "   • $($profile.Name) ($($profile.NetworkCategory))" -ForegroundColor Gray
-            }
-        }
-    } catch { }
-}
-
-function Get-ReputationProtection {
-    Write-SectionHeader "App & browser control" "🌐"
-
-    $preferences = Get-MpPreference
-    
-    Write-Host "`n  Reputation-based protection" -ForegroundColor Cyan
-    
-    # SmartScreen
-    $checkApps = Get-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "SmartScreenEnabled" -DefaultValue "Warn"
-    Write-StatusIcon ($checkApps -ne 'Off')
-    Write-Host "Check apps and files" -ForegroundColor White
-
-    $edgeSmartScreen = Get-RegValue -Path "HKCU:\Software\Microsoft\Edge\SmartScreen" -Name "Enabled" -DefaultValue 1
-    Write-StatusIcon ($edgeSmartScreen -ne 0)
-    Write-Host "SmartScreen for Microsoft Edge" -ForegroundColor White
-
-    $storeSmartScreen = Get-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AppHost" -Name "EnableWebContentEvaluation" -DefaultValue 1
-    Write-StatusIcon ($storeSmartScreen -ne 0)
-    Write-Host "SmartScreen for Microsoft Store apps" -ForegroundColor White
-
-    # Phishing protection
-    Write-Host "`n  Phishing protection" -ForegroundColor Cyan
-    
-    $phishNotifyMalicious = Get-RegValue -Path "HKCU:\Software\Microsoft\PhishingProtection" -Name "NotifyMalicious" -DefaultValue 1
-    Write-StatusIcon ($phishNotifyMalicious -ne 0)
-    Write-Host "Warn about malicious apps and sites" -ForegroundColor White
-
-    $phishNotifyPasswordReuse = Get-RegValue -Path "HKCU:\Software\Microsoft\PhishingProtection" -Name "NotifyPasswordReuse" -DefaultValue 1
-    Write-StatusIcon ($phishNotifyPasswordReuse -ne 0)
-    Write-Host "Warn about password reuse" -ForegroundColor White
-
-    $phishNotifyUnsafeStorage = Get-RegValue -Path "HKCU:\Software\Microsoft\PhishingProtection" -Name "NotifyUnsafeStorage" -DefaultValue 1
-    Write-StatusIcon ($phishNotifyUnsafeStorage -ne 0)
-    Write-Host "Warn about unsafe password storage" -ForegroundColor White
-
-    # $phishServiceCollection = Get-RegValue -Path "HKCU:\Software\Microsoft\PhishingProtection" -Name "ServiceCollection" -DefaultValue 1
-    # Write-StatusIcon ($phishServiceCollection -ne 0)
-    # Write-Host "Automatically collect content for analysis" -ForegroundColor White
-
-    # Potentially unwanted app blocking
-    Write-Host "`n  Potentially unwanted app blocking" -ForegroundColor Cyan
-    
-    $puaEnabled = $preferences.PUAProtection -eq 1
-    Write-StatusIcon $puaEnabled
-    Write-Host "Block apps" -ForegroundColor White
-    
-    # Determine Block downloads (Edge SmartScreen PUA setting).
-    function Get-EdgePUABlockDownloadsEnabled {
-        # 1) Check Group Policy path (system-wide policy)
-        try {
-            $policyVal = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Name 'SmartScreenPuaEnabled' -ErrorAction Stop
-            if ($null -ne $policyVal) { return ($policyVal -ne 0) }
-        } catch { }
-
-        # 2) Check named value under HKCU\Software\Microsoft\Edge
-        try {
-            $userNamed = Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Edge' -Name 'SmartScreenPuaEnabled' -ErrorAction Stop
-            if ($null -ne $userNamed) { return ($userNamed -ne 0) }
-        } catch { }
-
-        # 3) Check legacy/per-user key where the key itself exists and its default value holds the DWORD:
-        try {
-            $subKey = 'Software\Microsoft\Edge\SmartScreenPuaEnabled'
-            $rk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($subKey)
-            if ($rk -ne $null) {
-                $defaultVal = $rk.GetValue("")   # default value of the key
-                if ($null -ne $defaultVal) { return ($defaultVal -ne 0) }
-            }
-        } catch { }
-
-        # 4) Fallback: check Edge SmartScreen Enabled flags that imply downloads blocking
-        try {
-            $edgeSmart = Get-RegValue -Path "HKCU:\Software\Microsoft\Edge\SmartScreen" -Name "Enabled" -DefaultValue 1
-            # If SmartScreen for Edge is off then downloads blocking cannot be on.
-            if ($edgeSmart -eq 0) { return $false }
-        } catch { }
-
-        return $false
-    }
-
-    $blockDownloads = Get-EdgePUABlockDownloadsEnabled
-    Write-StatusIcon ($blockDownloads)
-    Write-Host "Block downloads" -ForegroundColor White
-}
-
-function Get-CoreIsolationStatus {
-    Write-SectionHeader "Device security" "🔒"
-
-    $preferences = Get-MpPreference
-    
-    Write-Host "`n  Core isolation" -ForegroundColor Cyan
-    
-    $memIntegrity = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" -Name "Enabled" -DefaultValue 0
-    Write-StatusIcon ($memIntegrity -eq 1)
-    Write-Host "Memory integrity" -ForegroundColor White
-
-    $kernelStackProt = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\KernelShadowStacks" -Name "Enabled" -DefaultValue 0
-    Write-StatusIcon ($kernelStackProt -eq 1)
-    Write-Host "Kernel-mode Hardware-enforced Stack Protection" -ForegroundColor White
-
-    Write-Host "`n  Security processor" -ForegroundColor Cyan
-    
-    $lsaProtection = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -DefaultValue 0
-    Write-StatusIcon ($lsaProtection -ge 1)
-    Write-Host "Local Security Authority protection" -ForegroundColor White
-
-    Write-StatusIcon (!$preferences.DisableVulnerableDriverBlocklist)
-    Write-Host "Microsoft Vulnerable Driver Blocklist" -ForegroundColor White
-}
-
-function Get-ScanInformation {
-    Write-SectionHeader "Scan information" "🔍"
-    
-    $status = Get-MpComputerStatus
-    
-    Write-Host "  Last quick scan:      " -NoNewline -ForegroundColor Gray
-    Write-Host $status.QuickScanStartTime -ForegroundColor White
-    
-    Write-Host "  Last full scan:       " -NoNewline -ForegroundColor Gray
-    Write-Host $status.FullScanStartTime -ForegroundColor White
-    
-    Write-Host "  Signature version:    " -NoNewline -ForegroundColor Gray
-    Write-Host $status.AntivirusSignatureVersion -ForegroundColor White
-    
-    Write-Host "  Last updated:         " -NoNewline -ForegroundColor Gray
-    Write-Host $status.AntivirusSignatureLastUpdated -ForegroundColor White
-}
-
+# 1. Define Log File Path
 try {
+    if (-not (Test-Path -Path $LogDirectory)) {
+        Write-Warning "Log directory '$LogDirectory' does not exist. Attempting to create."
+        New-Item -Path $LogDirectory -ItemType Directory -ErrorAction Stop | Out-Null
+    }
+
+    $LogBaseName = $MyInvocation.MyCommand.Name -replace '\.ps1$'
+    $LogName = "${LogBaseName}_$(Get-Date -Format 'yyyyMMdd_HHmmss')_FILE.log"
+    $LogPath = Join-Path -Path $LogDirectory -ChildPath $LogName
+
+    # 2. Start Transcript
+    Start-Transcript -Path $LogPath -ErrorAction Stop
+}
+catch {
+    # This catch block handles errors *before* logging starts (e.g., permission error)
+    Write-Error "CRITICAL: Failed to initialize log file at '$LogPath'. Script cannot continue."
+    Write-Error $_.Exception.Message
+    exit 1 # Exit script with a failure code
+}
+
+# 3. Main Script Body (wrapped in try/catch/finally)
+try {
+    # Clear the console before output begins
     Clear-Host
     
-    # Header
-    Write-Host "`n╔════════════════════════════════════════════════════════════╗" -ForegroundColor Blue
-    Write-Host "║          " -NoNewline -ForegroundColor Blue
-    Write-Host "WINDOWS SECURITY STATUS REPORT" -NoNewline -ForegroundColor White
-    Write-Host "             ║" -ForegroundColor Blue
-    Write-Host "╚════════════════════════════════════════════════════════════╝" -ForegroundColor Blue
-
-    Get-DefenderStatus
-    Get-AccountProtection
-    Get-FirewallStatus
-    Get-ReputationProtection
-    Get-CoreIsolationStatus
-    Get-ScanInformation
+    # Display script title and description (centered)
+    $Title = "PowerShell Script Scaffold"
+    $Desc1 = "A reusable template for creating well-structured PowerShell scripts"
+    $Desc2 = "with built-in logging, formatted status output, and professional error handling."
     
-    # Footer: print local date/time like "Script last edited: 2025-10-27 10:14 AM PDT by Gemini 2.5 Pro"
-    $now = Get-Date
-    $localDate = $now.ToString('yyyy-MM-dd')
-    $localTime = $now.ToString('hh:mm tt')
-    $tz = Get-TimeZone
-
-    if ($tz.Id -match 'UTC') {
-        $tzAbbr = 'UTC'
-    } else {
-        $tzName = if ([System.TimeZoneInfo]::Local.IsDaylightSavingTime($now)) { $tz.DaylightName } else { $tz.StandardName }
-        $clean = ($tzName -replace '[^A-Za-z\s]','').Trim()
-        $tzAbbr = ($clean -split '\s+' | ForEach-Object { $_.Substring(0,1).ToUpper() }) -join ''
+    try {
+        $WindowWidth = $Host.UI.RawUI.WindowSize.Width
     }
-
-    Write-Host "`n" -NoNewline
-    Write-Host ("─" * 60) -ForegroundColor DarkGray
-    Write-Host "  Script last edited: " -NoNewline -ForegroundColor Gray
-    Write-Host "$localDate $localTime $tzAbbr by Gemini 2.5 Pro" -ForegroundColor White
-    Write-Host ""
+    catch {
+        $WindowWidth = 80 # Fallback
+    }
     
-} catch {
-    Write-Host "`n[ERROR] " -NoNewline -ForegroundColor Red
-    Write-Host $_ -ForegroundColor White
-    Write-Host "`nMake sure you're running this script as Administrator.`n" -ForegroundColor Yellow
+    # Center the title
+    $TitlePadding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Title.Length) / 2))
+    Write-Host (" " * $TitlePadding) -NoNewline
+    Write-Host $Title -ForegroundColor Cyan
+    
+    # Center the description lines
+    $Desc1Padding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Desc1.Length) / 2))
+    Write-Host (" " * $Desc1Padding) -NoNewline
+    Write-Host $Desc1 -ForegroundColor DarkGray
+    
+    $Desc2Padding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Desc2.Length) / 2))
+    Write-Host (" " * $Desc2Padding) -NoNewline
+    Write-Host $Desc2 -ForegroundColor DarkGray
+    
+    Write-Host # Add a blank line
+    
+    # --- Demo Output (controlled by -ShowDemo parameter) ---
+    if ($ShowDemo) {
+        Write-Host "Sample of default output format:" -ForegroundColor Blue
+        Write-Host # Add a blank line for readability
+        
+        # Display legend
+        Write-Host "Legend: " -NoNewline -ForegroundColor DarkGray
+        Write-Host "[+]" -NoNewline -ForegroundColor Green
+        Write-Host " Success  " -NoNewline -ForegroundColor DarkGray
+        Write-Host "[-]" -NoNewline -ForegroundColor Red
+        Write-Host " Failed  " -NoNewline -ForegroundColor DarkGray
+        Write-Host "[!]" -NoNewline -ForegroundColor Yellow
+        Write-Host " Warning" -ForegroundColor DarkGray
+        Write-Host # Add a blank line
+
+        # --- START DEMO SCRIPT LOGIC (using Write-StatusLine) ---
+
+        Write-StatusLine -Description "Windows Update svc status" -Status "[+]"
+        Write-StatusLine -Description "Disk space check (C: drive)" -Status "[+]"
+        Write-StatusLine -Description "Network conn test" -Status "[-]"
+        Write-StatusLine -Description "Antivirus def update" -Status "[+]"
+        # Test for a line that will be clipped
+        Write-StatusLine -Description "Descriptions of checks made by the script longer than 98 characters in length will be truncated!" -Status "[!]"
+        
+        # --- END DEMO SCRIPT LOGIC ---
+        
+        Write-Host # Add a blank line
+    }
+    
+    # --- ACTUAL SYSTEM CHECKS ---
+    Write-Host "System Health Checks:" -ForegroundColor Blue
+    Write-Host # Add a blank line
+    
+    # Check 1: Disk Space on C: Drive
+    try {
+        $CDrive = Get-PSDrive C -ErrorAction Stop
+        $FreeSpacePercent = ($CDrive.Free / ($CDrive.Used + $CDrive.Free)) * 100
+        
+        if ($FreeSpacePercent -lt 70) {
+            Write-StatusLine -Description "C: drive free space (${FreeSpacePercent:N1}% avail)" -Status "[-]"
+        }
+        elseif ($FreeSpacePercent -lt 85) {
+            Write-StatusLine -Description "C: drive free space (${FreeSpacePercent:N1}% avail)" -Status "[!] - Under 85%"
+        }
+        else {
+            Write-StatusLine -Description "C: drive free space (${FreeSpacePercent:N1}% avail)" -Status "[+]"
+        }
+    }
+    catch {
+        Write-StatusLine -Description "C: drive free space check" -Status "[-]"
+    }
+    
+    # Check 2: PowerShell Version
+    $PSVersion = $PSVersionTable.PSVersion.Major
+    if ($PSVersion -ge 7) {
+        Write-StatusLine -Description "PS ver ($PSVersion.x detected)" -Status "[+]"
+    }
+    elseif ($PSVersion -ge 5) {
+        Write-StatusLine -Description "PS ver ($PSVersion.x detected)" -Status "[!] - Upgrade to 7+"
+    }
+    else {
+        Write-StatusLine -Description "PS ver ($PSVersion.x detected)" -Status "[-]"
+    }
+    
+    # Check 3: Running as Administrator
+    $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($IsAdmin) {
+        Write-StatusLine -Description "Script running with admin privs" -Status "[+]"
+    }
+    else {
+        Write-StatusLine -Description "Script running without admin privs" -Status "[-]"
+    }
+    
+    Write-Host # Add a blank line
+    Write-Host # Add a blank line
+    Write-StatusLine -Description "Script exec completed" -Status "[+]"
 }
+catch {
+    # 4. Error Handling
+    Write-StatusLine -Description "Script exec failed - terminating error occurred" -Status "[-]"
+    Write-Host $_.Exception.Message # Print the raw error message
+    # exit 1 
+}
+finally {
+    # 5. Guaranteed Log Finalization
+    Write-Host # Add a blank line
+    Write-StatusLine -Description "Transcript log stopped" -Status "[+]"
+    Write-Host "Stopping transcript..."
+    Stop-Transcript | Out-Null
+}
+
+# Display log file location after transcript stops
+Write-Host "Log file saved to: " -NoNewline -ForegroundColor DarkGray
+Write-Host $LogPath -ForegroundColor Gray
+
+# Add three empty lines for vertical space in the console
+Write-Host
+Write-Host
+Write-Host
+
+# --- Omega Requirement (Line for the PowerShell Window) ---
+# This print happens *after* the transcript has stopped.
+
+# Static date/time of last script edit
+$Date = "2025/10/30"
+$Time = "11:02"
+
+# 1. Get TimeZone Abbreviation
+$TZInfo = Get-TimeZone
+$IsDaylight = [System.TimeZoneInfo]::Local.IsDaylightSavingTime((Get-Date))
+if ($TZInfo.SupportsDaylightSavingTime -and $IsDaylight) {
+    $FullName = $TZInfo.DaylightName
+} else {
+    $FullName = $TZInfo.StandardName
+}
+$TZAbbreviation = -join ($FullName -split ' ' | ForEach-Object { $_[0] })
+
+# 2. Define text parts
+$LastEdited = "Last edited"
+$LeftPart1 = " with "
+$LLMName = "Claude Sonnet 4.5"
+$LeftPart2 = " at "
+$LeftPart3 = " ($TZAbbreviation) on $Date" # Time is handled separately
+$RightPart1 = " - by "
+$RightPart2 = "Keith Tibbitts"
+$RightText = $RightPart1 + $RightPart2 # Used for length calculation
+
+# 3. Calculate Padding
+$FullLeftText = "$LastEdited$LeftPart1$LLMName$LeftPart2$Time$LeftPart3" 
+try {
+    $WindowWidth = $Host.UI.RawUI.WindowSize.Width
+}
+catch {
+    $WindowWidth = 80 # Fallback
+}
+$PaddingWidth = $WindowWidth - $FullLeftText.Length - $RightText.Length - 1 # -1 for safety
+if ($PaddingWidth -lt 1) { $PaddingWidth = 1 }
+$Padding = " " * $PaddingWidth
+
+# 4. Print the final line in multiple parts to allow for color
+Write-Host $LastEdited -ForegroundColor Cyan -NoNewline # "Last edited" in teal
+Write-Host $LeftPart1 -NoNewline
+Write-Host $LLMName -ForegroundColor DarkYellow -NoNewline # Claude's brand color (orange)
+Write-Host $LeftPart2 -NoNewline
+Write-Host $Time -ForegroundColor Cyan -NoNewline # Use Cyan for "Teal"
+Write-Host $LeftPart3 -NoNewline
+Write-Host $Padding -NoNewline
+Write-Host $RightPart1 -NoNewline
+Write-Host $RightPart2 -ForegroundColor Cyan # Use Cyan for "Teal"
