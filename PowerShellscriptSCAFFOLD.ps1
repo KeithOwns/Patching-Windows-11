@@ -64,8 +64,9 @@ function Write-StatusLine {
     # --- End of padding logic ---
 
     # Define status words and their colors
-    $PositiveWords = "on", "active", "configured", "complete", "successful", "finish", "finished", "ok"
-    $NegativeWords = "off", "inactive", "failed", "error", "incomplete", "not found"
+    $PositiveWords = "on", "active", "configured", "complete", "successful", "finish", "finished", "ok", "[+]"
+    $NegativeWords = "off", "inactive", "failed", "error", "incomplete", "not found", "[-]"
+    $WarningWords = "warning", "[!]"
 
     $Color = "White" # Default
     if ($PositiveWords -contains $Status.ToLower()) {
@@ -74,7 +75,7 @@ function Write-StatusLine {
     elseif ($NegativeWords -contains $Status.ToLower()) {
         $Color = "Red"
     }
-    elseif ($Status.ToLower() -eq "warning") {
+    elseif ($WarningWords -contains $Status.ToLower()) {
         $Color = "Yellow"
     }
 
@@ -115,23 +116,49 @@ catch {
 
 # 3. Main Script Body (wrapped in try/catch/finally)
 try {
-    # --- Sigma Requirement (Line Split) ---
-    Write-Host "Script execution started. Logging to:"
-    Write-Host $LogPath
+    # Clear the console before output begins
+    Clear-Host
     
-    Write-Host "Running as user: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+    # Display script title and description (centered)
+    $Title = "PowerShell Script Scaffold"
+    $Desc1 = "A reusable template for creating well-structured PowerShell scripts with built-in logging,"
+    $Desc2 = "formatted status output, and professional error handling."
+    
+    try {
+        $WindowWidth = $Host.UI.RawUI.WindowSize.Width
+    }
+    catch {
+        $WindowWidth = 80 # Fallback
+    }
+    
+    # Center the title
+    $TitlePadding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Title.Length) / 2))
+    Write-Host (" " * $TitlePadding) -NoNewline
+    Write-Host $Title -ForegroundColor Cyan
+    
+    # Center the description lines
+    $Desc1Padding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Desc1.Length) / 2))
+    Write-Host (" " * $Desc1Padding) -NoNewline
+    Write-Host $Desc1 -ForegroundColor DarkGray
+    
+    $Desc2Padding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Desc2.Length) / 2))
+    Write-Host (" " * $Desc2Padding) -NoNewline
+    Write-Host $Desc2 -ForegroundColor DarkGray
+    
+    Write-Host # Add a blank line
+    
+    # --- Sigma Requirement (Line Split) ---
+    Write-Host "Sample of default output format:" -ForegroundColor DarkGray
     Write-Host # Add a blank line for readability
 
     # --- START SCRIPT LOGIC (using Write-StatusLine) ---
 
-    Write-StatusLine -Description "Checking system configuration" -Status "OK"
-    Write-StatusLine -Description "Sample service check 1 (long name)" -Status "Active"
-    Write-StatusLine -Description "Sample service check 2 (short)" -Status "Inactive"
-    Write-StatusLine -Description "Testing alignment" -Status "Complete"
+    Write-StatusLine -Description "Checking system configuration" -Status "[+]"
+    Write-StatusLine -Description "Sample service check 1 (long name)" -Status "[+]"
+    Write-StatusLine -Description "Sample service check 2 (short)" -Status "[-]"
+    Write-StatusLine -Description "Testing alignment" -Status "[+]"
     # Test for a line that will be clipped
-    Write-StatusLine -Description "This description is very long. In fact, it's over 98 characters long, so the text starting from 'so' should be clipped." -Status "Failed"
-    # Test for a status that will be clipped
-    Write-StatusLine -Description "Testing long status" -Status "ThisIsTooLong"
+    Write-StatusLine -Description "Descriptions of checks made by the script longer than 98 characters in length will be truncated!" -Status "[!]"
     
     # --- END SCRIPT LOGIC ---
     
@@ -174,14 +201,16 @@ if ($TZInfo.SupportsDaylightSavingTime -and $IsDaylight) {
 $TZAbbreviation = -join ($FullName -split ' ' | ForEach-Object { $_[0] })
 
 # 2. Define text parts
-$LeftPart1 = "Created with Gemini 2.5 Pro at "
-$LeftPart2 = " ($TZAbbreviation) on $Date" # Time is handled separately
+$LeftPart1 = "Created with "
+$LLMName = "Claude Sonnet 4.5"
+$LeftPart2 = " at "
+$LeftPart3 = " ($TZAbbreviation) on $Date" # Time is handled separately
 $RightPart1 = " - by "
 $RightPart2 = "Keith Tibbitts"
 $RightText = $RightPart1 + $RightPart2 # Used for length calculation
 
 # 3. Calculate Padding
-$FullLeftText = "$LeftPart1$Time$LeftPart2" 
+$FullLeftText = "$LeftPart1$LLMName$LeftPart2$Time$LeftPart3" 
 try {
     $WindowWidth = $Host.UI.RawUI.WindowSize.Width
 }
@@ -194,8 +223,10 @@ $Padding = " " * $PaddingWidth
 
 # 4. Print the final line in multiple parts to allow for color
 Write-Host $LeftPart1 -NoNewline
-Write-Host $Time -ForegroundColor Cyan -NoNewline # Use Cyan for "Teal"
+Write-Host $LLMName -ForegroundColor DarkYellow -NoNewline # Claude's brand color (orange)
 Write-Host $LeftPart2 -NoNewline
+Write-Host $Time -ForegroundColor Cyan -NoNewline # Use Cyan for "Teal"
+Write-Host $LeftPart3 -NoNewline
 Write-Host $Padding -NoNewline
 Write-Host $RightPart1 -NoNewline
 Write-Host $RightPart2 -ForegroundColor Cyan # Use Cyan for "Teal"
