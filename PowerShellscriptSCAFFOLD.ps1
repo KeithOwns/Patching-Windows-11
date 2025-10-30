@@ -6,9 +6,10 @@
     formatted status output using color-coded symbols, and robust error handling. It includes:
     - Automatic transcript logging with timestamps
     - Write-StatusLine function with [+] (success), [-] (failed), [!] (warning) symbols
+    - Self-elevating admin privilege check
     - Try/catch/finally error handling
     - Professional header and footer output
-    Replace the sample script logic with your own code to create production-ready scripts.
+    - Modern color output using $PSStyle (falls back for older consoles)
 .PARAMETER LogDirectory
     Specifies a custom directory to store the log files.
     Defaults to the current user's Downloads folder ($env:USERPROFILE\Downloads).
@@ -16,24 +17,30 @@
     When present, displays sample output demonstrating the Write-StatusLine formatting.
     Omit this parameter in production to suppress demo output.
 .EXAMPLE
-    .\PowerShellscriptSCAFFOLD.ps1
-    Runs the script with default parameters, logging to the user's Downloads folder.
+    .\PowerShellScriptScaffold_v2.ps1
+    Runs the script. If not admin, it will attempt to re-launch itself as admin.
 .EXAMPLE
-    .\PowerShellscriptSCAFFOLD.ps1 -LogDirectory "C:\Logs"
-    Runs the script and stores the resulting log file in "C:\Logs".
+    .\PowerShellScriptScaffold_v2.ps1 -LogDirectory "C:\Logs"
+    Runs the script as admin and stores the resulting log file in "C:\Logs".
 .EXAMPLE
-    .\PowerShellscriptSCAFFOLD.ps1 -ShowDemo
-    Runs the script and displays sample formatted output.
+    .\PowerShellScriptScaffold_v2.ps1 -ShowDemo
+    Runs the script as admin and displays sample formatted output.
 .NOTES
-    Author:      Keith Tibbitts
-    Created:     2025-10-29
-    Version:     2.14
+    Author:     Keith Tibbitts
+    Created:    2025-10-29
+    Version:    2.16 (Gemini Edits)
     
     Status Symbol Legend:
     [+] = Success/Positive (Green)
     [-] = Failed/Negative (Red)
     [!] = Warning/Note (Yellow)
     [?] = Unknown (Gray)
+
+    Scheduled Task Note:
+    If running this script as a scheduled task, be aware that the default $LogDirectory
+    ($env:USERPROFILE\Downloads) will resolve to the profile of the account running the task
+    (e.g., C:\Windows\System32\config\systemprofile\Downloads for the SYSTEM account).
+    It is recommended to use the -LogDirectory parameter to specify an explicit path.
 #>
 
 [CmdletBinding()]
@@ -48,39 +55,22 @@ param (
 # --- Sigma Requirement: Formatting Function & Output Standards ---
 # This requirement includes:
 # 1. Write-StatusLine function for consistent formatted output
-# 2. Use of common abbreviations in script output to maximize space within the 98-character description limit
+# 2. Use of common abbreviations in script output
 # 3. Text wrapping rules: When multi-line text is needed, break lines at natural word boundaries.
-#    Never split words across lines. Ensure each line is a complete phrase for readability.
-# 4. Warning status details: When a [!] status is generated and additional information is available,
-#    display it concisely to the right of the [!] symbol. Format: "[!] - Additional info"
-#    Example: "[!] - Under 85%" or "[!] - Needs update"
-# 5. Section headings: All section headings in script output should be displayed in Blue color.
-#    Example: Write-Host "System Health Checks:" -ForegroundColor Blue
-#
-# Common abbreviations to use:
-# - "config" or "cfg" instead of "configuration"
-# - "svc" instead of "service"
-# - "conn" instead of "connection"
-# - "msg" instead of "message"
-# - "info" instead of "information"
-# - "cert" instead of "certificate"
-# - "auth" instead of "authentication"
-# - "admin" instead of "administrator"
-# - "privs" instead of "privileges"
-# - "exec" instead of "execution"
-# - "log" instead of "logging"
-# - "ver" instead of "version"
-# - "PS" instead of "PowerShell" (except in titles)
-# - "avail" instead of "available"
-# - "temp" instead of "temporary"
-# - "max" instead of "maximum"
-# - "min" instead of "minimum"
-# - "def" instead of "default"
-# - "mgmt" instead of "management"
-# - "perm" instead of "permission"
-# - "proc" instead of "process"
-# - "req" instead of "required/requirement"
-# - Use standard tech abbreviations: RAM, CPU, DNS, IP, URL, API, etc.
+# 4. Section headings: All section headings in script output should be displayed in Blue color.
+
+# --- Define Colors (Use $PSStyle if available) ---
+# These are defined early so the Write-StatusLine function can see them in this scope.
+$cSuccess = if ($PSStyle) { $PSStyle.Foreground.Green } else { "Green" }
+$cError   = if ($PSStyle) { $PSStyle.Foreground.Red } else { "Red" }
+$cWarning = if ($PSStyle) { $PSStyle.Foreground.Yellow } else { "Yellow" }
+$cUnknown = if ($PSStyle) { $PSStyle.Foreground.Gray } else { "Gray" }
+$cHeader  = if ($PSStyle) { $PSStyle.Foreground.Blue } else { "Blue" }
+$cCyan    = if ($PSStyle) { $PSStyle.Foreground.Cyan } else { "Cyan" }
+$cDim     = if ($PSStyle) { $PSStyle.Foreground.DarkGray } else { "DarkGray" }
+$cGray    = if ($PSStyle) { $PSStyle.Foreground.Gray } else { "Gray" }
+$cReset   = if ($PSStyle) { $PSStyle.Reset } else { "" }
+
 
 function Write-StatusLine {
     <#
@@ -88,31 +78,14 @@ function Write-StatusLine {
         Writes a line with a left-justified description and an aligned, colored status.
     .DESCRIPTION
         Formats output with a description, dotted padding, and a colored status indicator.
-        Supports both symbolic and text status values:
-        - [+] = Success/Positive (Green)
-        - [-] = Failed/Negative (Red)  
-        - [!] = Warning/Note (Yellow)
-        - [?] = Unknown (Gray)
-        - Text values like "OK", "Active", "Failed", "Warning" are also supported
-        
-        SIGMA REQUIREMENT: 
-        - Use common abbreviations in descriptions to stay within limits
-        - Status symbols positioned at 50 characters (preferred) or up to 67 characters (max)
-        - Keep descriptions concise for optimal readability
-        - Warning details: For [!] status, append additional info after the symbol: "[!] - Details"
-        Examples: "svc" (service), "config" (configuration), "conn" (connection), "auth" (authentication)
+        Uses $PSStyle for modern terminals if available, otherwise falls back to -ForegroundColor.
     .PARAMETER Description
         The description text (max 60 characters, will be truncated if longer)
     .PARAMETER Status
-        The status indicator (max 10 characters, will be truncated if longer)
-        For warnings with details, use format: "[!] - Additional info"
+        The status indicator (max 15 characters, will be truncated if longer)
     .EXAMPLE
         Write-StatusLine -Description "Windows Update svc status" -Status "[+]"
         Write-StatusLine -Description "Network conn test" -Status "[-]"
-        Write-StatusLine -Description "Disk space warning (C: drive)" -Status "[!] - Under 85%"
-        Write-StatusLine -Description "Unknown state" -Status "[?]"
-        Write-StatusLine -Description "Disk space warning (C: drive)" -Status "[!]"
-        Write-StatusLine -Description "Unknown state" -Status "[?]"
     #>
     [CmdletBinding()]
     param (
@@ -120,9 +93,9 @@ function Write-StatusLine {
         [string]$Status
     )
 
-    # --- EDIT: Clip (truncate) Description and Status to new limits ---
+    # --- Clip (truncate) Description and Status to new limits ---
     $MaxDescLength = 60  # Max description before status (allowing for spacing to 67)
-    $MaxStatusLength = 20  # Increased to accommodate warning details: "[!] - Additional info"
+    $MaxStatusLength = 15  # Max status text length (e.g., "successful", "incomplete")
 
     if ($Description.Length -gt $MaxDescLength) {
         $Description = $Description.Substring(0, $MaxDescLength)
@@ -132,12 +105,10 @@ function Write-StatusLine {
     }
 
     $PreferredIndent = 50  # Preferred position for status symbols
-    $MaxIndent = 67        # Maximum position for status symbols
+    $MaxIndent = 67      # Maximum position for status symbols
     $FillerChar = "."
     
     # Calculate padding based on description length
-    # If description is short, use preferred indent (50)
-    # If description is longer, use up to max indent (67)
     if ($Description.Length -lt $PreferredIndent) {
         $TargetIndent = $PreferredIndent
     }
@@ -149,9 +120,8 @@ function Write-StatusLine {
     }
     $PaddingWidth = $TargetIndent - $Description.Length
     
-    if ($PaddingWidth -lt 1) { 
-        # This handles cases where $Description is exactly 98 or 99 chars
-        $PaddingWidth = 1 
+    if ($PaddingWidth -lt 1) {  
+        $PaddingWidth = 1  
     }
     
     $Padding = $FillerChar * $PaddingWidth
@@ -163,46 +133,64 @@ function Write-StatusLine {
     $WarningWords = "warning"
     $UnknownWords = "unknown"
 
-    $Color = "White" # Default
-    
+    # --- EDIT: Use variables defined in the script body ---
+    $AnsiColor = $cUnknown # Default ANSI sequence
+    $LegacyColor = "Gray"   # Default legacy color string
+
     # Check if status starts with a symbol
     if ($Status -match '^\[\+\]') {
-        $Color = "Green"
+        $AnsiColor = $cSuccess
+        $LegacyColor = "Green"
     }
     elseif ($Status -match '^\[-\]') {
-        $Color = "Red"
+        $AnsiColor = $cError
+        $LegacyColor = "Red"
     }
     elseif ($Status -match '^\[!\]') {
-        $Color = "Yellow"
+        $AnsiColor = $cWarning
+        $LegacyColor = "Yellow"
     }
     elseif ($Status -match '^\[\?\]') {
-        $Color = "Gray"
+        $AnsiColor = $cUnknown
+        $LegacyColor = "Gray"
     }
     # Otherwise check text-based status
     elseif ($PositiveWords -contains $Status.ToLower()) {
-        $Color = "Green"
+        $AnsiColor = $cSuccess
+        $LegacyColor = "Green"
     }
     elseif ($NegativeWords -contains $Status.ToLower()) {
-        $Color = "Red"
+        $AnsiColor = $cError
+        $LegacyColor = "Red"
     }
     elseif ($WarningWords -contains $Status.ToLower()) {
-        $Color = "Yellow"
+        $AnsiColor = $cWarning
+        $LegacyColor = "Yellow"
     }
     elseif ($UnknownWords -contains $Status.ToLower()) {
-        $Color = "Gray"
+        $AnsiColor = $cUnknown
+        $LegacyColor = "Gray"
     }
 
-    # Write the formatted line with colored padding and status
-    Write-Host $Description -NoNewline
-    Write-Host $Padding -ForegroundColor $Color -NoNewline
-    Write-Host $Status -ForegroundColor $Color
+    # --- EDIT: Write the line using $PSStyle if available ---
+    if ($PSStyle) {
+        # $AnsiColor already contains the ANSI sequence
+        Write-Host $Description -NoNewline
+        Write-Host "$($AnsiColor)${Padding}${Status}$($cReset)"
+    }
+    else {
+        # Fallback to legacy -ForegroundColor
+        Write-Host $Description -NoNewline
+        Write-Host $Padding -ForegroundColor $LegacyColor -NoNewline
+        Write-Host $Status -ForegroundColor $LegacyColor
+    }
 }
 
 
 # --- Alpha Requirement: Robust Logging ---
 
 # Set default Log Directory using the $env:USERPROFILE variable
-if ([string]::IsNullOrEmpty($LogDirectory)) {
+if (-not $LogDirectory) { # Use idiomatic PowerShell check
     $LogDirectory = Join-Path -Path $env:USERPROFILE -ChildPath 'Downloads'
 }
 
@@ -229,6 +217,51 @@ catch {
 
 # 3. Main Script Body (wrapped in try/catch/finally)
 try {
+    
+    # --- EDIT: REPLACED PRE-FLIGHT CHECK ---
+    # --- PRE-FLIGHT CHECK: Admin Privileges (Self-Elevating) ---
+    $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    
+    if (-not $IsAdmin) {
+        Clear-Host
+        # Note: Write-StatusLine is defined above, so we can use it here.
+        Write-StatusLine -Description "Admin privs required" -Status "[!]"
+        Write-Host "Attempting to re-launch as Administrator..." -ForegroundColor $cWarning
+        Start-Sleep -Seconds 2
+        
+        try {
+            # Get all script parameters and re-construct them for the new process
+            $Params = @()
+            if ($PSBoundParameters.Count -gt 0) {
+                $Params = $PSBoundParameters.Keys | ForEach-Object {
+                    # Handle switch parameters
+                    if ($PSBoundParameters[$_] -is [bool] -and $PSBoundParameters[$_]) {
+                        "-$_"
+                    }
+                    # Handle parameters with values
+                    elseif ($PSBoundParameters[$_] -isnot [bool]) {
+                        # Quote parameters with spaces
+                        "-$_", "'$($PSBoundParameters[$_])'"
+                    }
+                }
+            }
+            
+            # Re-launch the script with the same parameters, elevated
+            Start-Process powershell -Verb RunAs -ArgumentList ("-NoProfile -File '{0}' {1}" -f $MyInvocation.MyCommand.Path, ($Params -join ' ')) -ErrorAction Stop
+        }
+        catch {
+            Write-StatusLine -Description "Re-launch as admin failed" -Status "[-]"
+            Write-Warning "Please re-run as Administrator."
+            Write-Host "Press Enter to exit..." -ForegroundColor $cGray
+            Read-Host | Out-Null
+        }
+        
+        # This exit will trigger the 'finally' block to stop the transcript
+        exit 1
+    }
+    # --- End Pre-flight Check ---
+
+
     # Clear the console before output begins
     Clear-Host
     
@@ -247,32 +280,32 @@ try {
     # Center the title
     $TitlePadding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Title.Length) / 2))
     Write-Host (" " * $TitlePadding) -NoNewline
-    Write-Host $Title -ForegroundColor Cyan
+    Write-Host $Title -ForegroundColor $cCyan
     
     # Center the description lines
     $Desc1Padding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Desc1.Length) / 2))
     Write-Host (" " * $Desc1Padding) -NoNewline
-    Write-Host $Desc1 -ForegroundColor DarkGray
+    Write-Host $Desc1 -ForegroundColor $cDim
     
     $Desc2Padding = [Math]::Max(0, [Math]::Floor(($WindowWidth - $Desc2.Length) / 2))
     Write-Host (" " * $Desc2Padding) -NoNewline
-    Write-Host $Desc2 -ForegroundColor DarkGray
+    Write-Host $Desc2 -ForegroundColor $cDim
     
     Write-Host # Add a blank line
     
     # --- Demo Output (controlled by -ShowDemo parameter) ---
     if ($ShowDemo) {
-        Write-Host "Sample of default output format:" -ForegroundColor Blue
+        Write-Host "Sample of default output format:" -ForegroundColor $cHeader
         Write-Host # Add a blank line for readability
         
         # Display legend
-        Write-Host "Legend: " -NoNewline -ForegroundColor DarkGray
-        Write-Host "[+]" -NoNewline -ForegroundColor Green
-        Write-Host " Success  " -NoNewline -ForegroundColor DarkGray
-        Write-Host "[-]" -NoNewline -ForegroundColor Red
-        Write-Host " Failed  " -NoNewline -ForegroundColor DarkGray
-        Write-Host "[!]" -NoNewline -ForegroundColor Yellow
-        Write-Host " Warning" -ForegroundColor DarkGray
+        Write-Host "Legend: " -NoNewline -ForegroundColor $cDim
+        Write-Host "[+]" -NoNewline -ForegroundColor $cSuccess
+        Write-Host " Success     " -NoNewline -ForegroundColor $cDim
+        Write-Host "[-]" -NoNewline -ForegroundColor $cError
+        Write-Host " Failed     " -NoNewline -ForegroundColor $cDim
+        Write-Host "[!]" -NoNewline -ForegroundColor $cWarning
+        Write-Host " Warning" -ForegroundColor $cDim
         Write-Host # Add a blank line
 
         # --- START DEMO SCRIPT LOGIC (using Write-StatusLine) ---
@@ -282,15 +315,15 @@ try {
         Write-StatusLine -Description "Network conn test" -Status "[-]"
         Write-StatusLine -Description "Antivirus def update" -Status "[+]"
         # Test for a line that will be clipped
-        Write-StatusLine -Description "Descriptions of checks made by the script longer than 98 characters in length will be truncated!" -Status "[!]"
+        Write-StatusLine -Description "Descriptions of checks made by the script longer than 60 characters in length will be truncated!" -Status "[!]"
         
         # --- END DEMO SCRIPT LOGIC ---
         
         Write-Host # Add a blank line
     }
     
-    # --- ACTUAL SYSTEM CHECKS ---
-    Write-Host "System Health Checks:" -ForegroundColor Blue
+    # --- ACTUAL SYSTEM CHEKS ---
+    Write-Host "System Health Checks:" -ForegroundColor $cHeader
     Write-Host # Add a blank line
     
     # Check 1: Disk Space on C: Drive
@@ -299,13 +332,13 @@ try {
         $FreeSpacePercent = ($CDrive.Free / ($CDrive.Used + $CDrive.Free)) * 100
         
         if ($FreeSpacePercent -lt 70) {
-            Write-StatusLine -Description "C: drive free space (${FreeSpacePercent:N1}% avail)" -Status "[-]"
+            Write-StatusLine -Description "C: drive free space (% avail)" -Status "[-]"
         }
         elseif ($FreeSpacePercent -lt 85) {
-            Write-StatusLine -Description "C: drive free space (${FreeSpacePercent:N1}% avail)" -Status "[!] - Under 85%"
+            Write-StatusLine -Description "C: drive free space (% avail)" -Status "[!]"
         }
         else {
-            Write-StatusLine -Description "C: drive free space (${FreeSpacePercent:N1}% avail)" -Status "[+]"
+            Write-StatusLine -Description "C: drive free space (% avail)" -Status "[+]"
         }
     }
     catch {
@@ -318,20 +351,15 @@ try {
         Write-StatusLine -Description "PS ver ($PSVersion.x detected)" -Status "[+]"
     }
     elseif ($PSVersion -ge 5) {
-        Write-StatusLine -Description "PS ver ($PSVersion.x detected)" -Status "[!] - Upgrade to 7+"
+        Write-StatusLine -Description "PS ver ($PSVersion.x detected)" -Status "[-]"
     }
     else {
         Write-StatusLine -Description "PS ver ($PSVersion.x detected)" -Status "[-]"
     }
     
     # Check 3: Running as Administrator
-    $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    if ($IsAdmin) {
-        Write-StatusLine -Description "Script running with admin privs" -Status "[+]"
-    }
-    else {
-        Write-StatusLine -Description "Script running without admin privs" -Status "[-]"
-    }
+    # Failure case is handled by pre-flight check at script start.
+    Write-StatusLine -Description "Script running with admin privs" -Status "[+]"
     
     Write-Host # Add a blank line
     Write-Host # Add a blank line
@@ -340,8 +368,8 @@ try {
 catch {
     # 4. Error Handling
     Write-StatusLine -Description "Script exec failed - terminating error occurred" -Status "[-]"
-    Write-Host $_.Exception.Message # Print the raw error message
-    # exit 1 
+    Write-Error $_ # Print the full error object to the error stream
+    exit 1  
 }
 finally {
     # 5. Guaranteed Log Finalization
@@ -352,8 +380,28 @@ finally {
 }
 
 # Display log file location after transcript stops
-Write-Host "Log file saved to: " -NoNewline -ForegroundColor DarkGray
-Write-Host $LogPath -ForegroundColor Gray
+# Wrapping Rule: Do not split words (e.g., the path) across lines.
+
+# --- Check width to prevent splitting path across lines ---
+$LogPrefix = "Log file saved to: "
+try {
+    # Get window width
+    $WindowWidth = $Host.UI.RawUI.WindowSize.Width
+}
+catch {
+    $WindowWidth = 80 # Fallback
+}
+
+if (($LogPrefix.Length + $LogPath.Length + 1) -gt $WindowWidth) {
+    # Path is too long, print on a new line to avoid word split
+    Write-Host $LogPrefix -ForegroundColor $cDim
+    Write-Host $LogPath -ForegroundColor $cGray
+}
+else {
+    # Fits on one line
+    Write-Host $LogPrefix -NoNewline -ForegroundColor $cDim
+    Write-Host $LogPath -ForegroundColor $cGray
+}
 
 # Add three empty lines for vertical space in the console
 Write-Host
@@ -363,10 +411,24 @@ Write-Host
 # --- Omega Requirement (Line for the PowerShell Window) ---
 # This print happens *after* the transcript has stopped.
 
+# --- Helper function for alternating colors ---
+function Write-AlternatingColors {
+    param (
+        [string]$Text,
+        [array]$Colors # Pass array of colors
+    )
+    
+    $ColorIndex = 0
+    foreach ($char in $Text.ToCharArray()) {
+        Write-Host $char -ForegroundColor $Colors[$ColorIndex] -NoNewline
+        $ColorIndex = ($ColorIndex + 1) % $Colors.Length
+    }
+}
+# --- End of helper function ---
+
 # Static date/time of last script edit
 $Date = "2025/10/30"
-$Time = "11:02"
-
+$Time = "14:35" # Updated time
 # 1. Get TimeZone Abbreviation
 $TZInfo = Get-TimeZone
 $IsDaylight = [System.TimeZoneInfo]::Local.IsDaylightSavingTime((Get-Date))
@@ -380,32 +442,63 @@ $TZAbbreviation = -join ($FullName -split ' ' | ForEach-Object { $_[0] })
 # 2. Define text parts
 $LastEdited = "Last edited"
 $LeftPart1 = " with "
-$LLMName = "Claude Sonnet 4.5"
+$LLMName = "Google Gemini"
+# Define $PSStyle colors
+$GeminiColors = "Green", "Yellow", "Red", "Blue" # Use legacy color strings for the rainbow effect
+
 $LeftPart2 = " at "
 $LeftPart3 = " ($TZAbbreviation) on $Date" # Time is handled separately
 $RightPart1 = " - by "
 $RightPart2 = "Keith Tibbitts"
-$RightText = $RightPart1 + $RightPart2 # Used for length calculation
+$RightText = $RightPart1 + $RightPart2
+$FullLeftText = "$LastEdited$LeftPart1$LLMName$LeftPart2$Time$LeftPart3"
 
-# 3. Calculate Padding
-$FullLeftText = "$LastEdited$LeftPart1$LLMName$LeftPart2$Time$LeftPart3" 
+# 3. Calculate Padding and Check Width
 try {
     $WindowWidth = $Host.UI.RawUI.WindowSize.Width
 }
 catch {
     $WindowWidth = 80 # Fallback
 }
-$PaddingWidth = $WindowWidth - $FullLeftText.Length - $RightText.Length - 1 # -1 for safety
-if ($PaddingWidth -lt 1) { $PaddingWidth = 1 }
-$Padding = " " * $PaddingWidth
 
-# 4. Print the final line in multiple parts to allow for color
-Write-Host $LastEdited -ForegroundColor Cyan -NoNewline # "Last edited" in teal
-Write-Host $LeftPart1 -NoNewline
-Write-Host $LLMName -ForegroundColor DarkYellow -NoNewline # Claude's brand color (orange)
-Write-Host $LeftPart2 -NoNewline
-Write-Host $Time -ForegroundColor Cyan -NoNewline # Use Cyan for "Teal"
-Write-Host $LeftPart3 -NoNewline
-Write-Host $Padding -NoNewline
-Write-Host $RightPart1 -NoNewline
-Write-Host $RightPart2 -ForegroundColor Cyan # Use Cyan for "Teal"
+$MinTotalLength = $FullLeftText.Length + $RightText.Length + 1 # +1 for a single space
+
+# --- Check width to prevent splitting line ---
+if ($MinTotalLength -gt $WindowWidth) {
+    # Line is too long to fit, even with minimal padding.
+    # Print left and right parts on separate lines to avoid splitting words.
+    
+    # Print Left Part (with colors)
+    Write-Host $LastEdited -ForegroundColor $cCyan -NoNewline
+    Write-Host $LeftPart1 -NoNewline
+    Write-AlternatingColors -Text $LLMName -Colors $GeminiColors
+    Write-Host $LeftPart2 -NoNewline
+    Write-Host $Time -ForegroundColor $cCyan -NoNewline
+    Write-Host $LeftPart3 # This prints a newline at the end
+
+    # Print Right Part (right-aligned on its own line)
+    $RightPaddingWidth = [Math]::Max(1, $WindowWidth - $RightText.Length - 1)
+    $RightPadding = " " * $RightPaddingWidth
+    
+    Write-Host $RightPadding -NoNewline
+    Write-Host $RightPart1 -NoNewline
+    Write-Host $RightPart2 -ForegroundColor $cCyan
+}
+else {
+    # Original logic: The line fits, so calculate dynamic padding.
+    $PaddingWidth = $WindowWidth - $FullLeftText.Length - $RightText.Length - 1 # -1 for safety
+    if ($PaddingWidth -lt 1) { $PaddingWidth = 1 }
+    $Padding = " " * $PaddingWidth
+
+    # 4. Print the final line in multiple parts to allow for color
+    Write-Host $LastEdited -ForegroundColor $cCyan -NoNewline
+    Write-Host $LeftPart1 -NoNewline
+    Write-AlternatingColors -Text $LLMName -Colors $GeminiColors
+    Write-Host $LeftPart2 -NoNewline
+    Write-Host $Time -ForegroundColor $cCyan -NoNewline
+    Write-Host $LeftPart3 -NoNewline
+    Write-Host $Padding -NoNewline
+    Write-Host $RightPart1 -NoNewline
+    Write-Host $RightPart2 -ForegroundColor $cCyan
+}
+
