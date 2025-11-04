@@ -124,7 +124,6 @@ function Optimize-Disks {
 
         foreach ($volume in $volumes) {
             $drive = $volume.DriveLetter
-            $driveType = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq $volume.ObjectId } | Select-Object -ExpandProperty MediaType -ErrorAction SilentlyContinue
 
             Write-Host "`n  Drive $drive`:\" -ForegroundColor Cyan
 
@@ -134,7 +133,7 @@ function Optimize-Disks {
                 $partition = Get-Partition -DriveLetter $drive -ErrorAction SilentlyContinue
                 if ($partition) {
                     $disk = Get-Disk -Number $partition.DiskNumber -ErrorAction SilentlyContinue
-                    if ($disk.MediaType -eq 'SSD') {
+                    if ($disk -and $disk.MediaType -eq 'SSD') {
                         $isSSD = $true
                     }
                 }
@@ -258,9 +257,15 @@ function Optimize-VisualEffects {
         $visualEffectsPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
         Set-RegistryDword -Path $visualEffectsPath -Name "VisualFXSetting" -Value 2  # 2 = Best Performance
 
-        # Disable animations
-        $advancedPath = "HKCU:\Control Panel\Desktop\WindowMetrics"
-        Set-RegistryDword -Path "HKCU:\Control Panel\Desktop" -Name "UserPreferencesMask" -Value 144,18,3,128,16,0,0,0
+        # Set UserPreferencesMask as binary value for visual effects optimization
+        try {
+            $maskPath = "HKCU:\Control Panel\Desktop"
+            $maskValue = [byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00)
+            Set-ItemProperty -Path $maskPath -Name "UserPreferencesMask" -Value $maskValue -Type Binary -Force
+            Write-Log -Message "UserPreferencesMask set successfully" -Level SUCCESS
+        } catch {
+            Write-Log -Message "Failed to set UserPreferencesMask (non-critical): $($_.Exception.Message)" -Level WARNING
+        }
 
         # Disable unnecessary visual effects
         Set-RegistryDword -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ListviewAlphaSelect" -Value 0
