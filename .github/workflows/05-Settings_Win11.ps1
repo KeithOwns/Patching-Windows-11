@@ -1,31 +1,28 @@
-#Requires -RunAsAdministrator
-
 <#
 .SYNOPSIS
-  Configures Windows Storage Sense settings via Group Policy with full control.
+  Configures Windows Storage Sense settings at the user level.
 .DESCRIPTION
-  Enables or disables Storage Sense system-wide to automatically free up disk space by removing
+  Enables or disables Storage Sense for the current user to automatically free up disk space by removing
   temporary files, items in the recycle bin, and files in the Downloads folder that
   haven't changed in a specified time period. Includes rollback capability.
 .PARAMETER Disable
-  Disables Storage Sense and removes all policy configurations
+  Resets Storage Sense settings to default by removing all configurations.
 .PARAMETER RecycleBinDays
   Days before emptying recycle bin (default: 30, options: 1, 14, 30, 60)
 .PARAMETER DownloadsDays
-  Days before cleaning Downloads folder (default: 60, options: 1, 14, 30, 60, never)
+  Days before cleaning Downloads folder (default: 60, options: 0, 1, 14, 30, 60. Use 0 for 'Never')
 .NOTES
-  Requires Administrator privileges
-  Storage Sense settings are controlled via Group Policy
-  These settings will override user preferences in Windows Settings
+  Storage Sense settings are configured in the user's registry hive (HKCU).
+  These settings directly modify the user's preferences in Windows Settings.
 .EXAMPLE
-  .\05-Settings_Win11.ps1
-  Enables Storage Sense with default settings
+  .\05-Settings_Win11_User.ps1
+  Enables Storage Sense with default settings for the current user.
 .EXAMPLE
-  .\05-Settings_Win11.ps1 -RecycleBinDays 14 -DownloadsDays 30
-  Enables Storage Sense with custom cleanup intervals
+  .\05-Settings_Win11_User.ps1 -RecycleBinDays 14 -DownloadsDays 30
+  Enables Storage Sense with custom cleanup intervals for the current user.
 .EXAMPLE
-  .\05-Settings_Win11.ps1 -Disable
-  Disables Storage Sense and removes all policy configurations
+  .\05-Settings_Win11_User.ps1 -Disable
+  Resets Storage Sense configuration for the current user.
 #>
 
 param(
@@ -54,6 +51,10 @@ function Write-StatusMessage {
     Write-Host $Message
 }
 
+# --- CORRECTED FUNCTIONS ---
+# Reverted to the simple, original functions. 
+# They work perfectly with HKCU paths and do not require the complex path replacement.
+
 function Get-RegistryValue {
     param([Parameter(Mandatory)] [string]$Path, [Parameter(Mandatory)] [string]$Name)
     try {
@@ -79,6 +80,8 @@ function Remove-RegistryValue {
         }
     } catch { }
 }
+# --- END CORRECTIONS ---
+
 
 function Test-WindowsVersion {
     $os = Get-CimInstance Win32_OperatingSystem
@@ -93,21 +96,22 @@ function Test-WindowsVersion {
     return $true
 }
 
-# Registry Paths
-$STORAGE_SENSE_POLICY = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\StorageSense"
+# Registry Path for Current User
+$STORAGE_SENSE_USER_PATH = "HKCU:\Software\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy"
 
 function Show-StorageSenseStatus {
     Write-Host "`n========================================" -ForegroundColor Cyan
-    Write-Host "Storage Sense Settings - Current Status" -ForegroundColor Cyan
+    Write-Host "Storage Sense Settings - Current Status (User)" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
 
-    Write-Host "`n--- Storage Sense Policy Configuration ---" -ForegroundColor Yellow
-    $storageSenseGlobal = Get-RegistryValue -Path $STORAGE_SENSE_POLICY -Name "AllowStorageSenseGlobal"
+    Write-Host "`n--- Storage Sense User Configuration ---" -ForegroundColor Yellow
+    # "01" is the registry value for enabling/disabling Storage Sense
+    $storageSenseGlobal = Get-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "01"
     
     $statusText = switch ($storageSenseGlobal) {
         1 { 'ENABLED'; break }
         0 { 'DISABLED'; break }
-        default { 'NOT CONFIGURED'; break }
+        default { 'NOT CONFIGURED (Default)'; break }
     }
     
     $statusLevel = switch ($storageSenseGlobal) {
@@ -116,13 +120,16 @@ function Show-StorageSenseStatus {
         default { 'INFO'; break }
     }
     
-    Write-StatusMessage ("Storage Sense (system-wide): $statusText") $statusLevel
+    Write-StatusMessage ("Storage Sense (current user): $statusText") $statusLevel
     
     if ($storageSenseGlobal -eq 1) {
         # Show detailed configuration
-        $recycleBinThreshold = Get-RegistryValue -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseRecycleBinCleanupThreshold"
-        $downloadsThreshold = Get-RegistryValue -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseDownloadsCleanupThreshold"
-        $cloudDehydration = Get-RegistryValue -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseCloudContentDehydrationThreshold"
+        # "04" = Recycle Bin threshold
+        $recycleBinThreshold = Get-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "04"
+        # "08" = Downloads folder threshold
+        $downloadsThreshold = Get-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "08"
+        # "32" = Cloud content dehydration threshold
+        $cloudDehydration = Get-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "32"
         
         Write-Host "`n    ℹ️  Storage Sense Active Configuration:" -ForegroundColor Cyan
         Write-Host "       • Delete temporary files: " -ForegroundColor Gray -NoNewline
@@ -153,46 +160,47 @@ function Show-StorageSenseStatus {
         }
         
     } elseif ($storageSenseGlobal -eq 0) {
-        Write-Host "`n    ⚠️  Storage Sense is explicitly disabled via policy" -ForegroundColor Yellow
+        Write-Host "`n    ⚠️  Storage Sense is explicitly disabled for this user" -ForegroundColor Yellow
     } else {
-        Write-Host "`n    ℹ️  Storage Sense is not configured via policy" -ForegroundColor Cyan
-        Write-Host "       Users can configure it manually in Settings > System > Storage" -ForegroundColor Gray
+        Write-Host "`n    ℹ️  Storage Sense is not configured for this user" -ForegroundColor Cyan
+        Write-Host "       User can configure it manually in Settings > System > Storage" -ForegroundColor Gray
     }
 }
 
 function Set-StorageSenseSettings {
     Write-Host "`n========================================" -ForegroundColor Cyan
-    Write-Host "Applying Storage Sense Settings" -ForegroundColor Cyan
+    Write-Host "Applying Storage Sense Settings (User)" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     
     try {
-        Write-Host "`nConfiguring Storage Sense policy..." -ForegroundColor Yellow
+        Write-Host "`nConfiguring Storage Sense for current user..." -ForegroundColor Yellow
         
-        # Enable Storage Sense globally
-        Set-RegistryDword -Path $STORAGE_SENSE_POLICY -Name "AllowStorageSenseGlobal" -Value 1
-        Write-StatusMessage "Storage Sense (system-wide): ENABLED" 'OK'
+        # Enable Storage Sense ("01")
+        Set-RegistryDword -Path $STORAGE_SENSE_USER_PATH -Name "01" -Value 1
+        Write-StatusMessage "Storage Sense (current user): ENABLED" 'OK'
+
+        # Enable "Delete temporary files" ("2048")
+        Set-RegistryDword -Path $STORAGE_SENSE_USER_PATH -Name "2048" -Value 1
+        Write-StatusMessage "Delete temporary files: ENABLED" 'OK'
         
-        # Configure Recycle Bin cleanup
-        Set-RegistryDword -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseRecycleBinCleanupThreshold" -Value $RecycleBinDays
+        # Configure Recycle Bin cleanup ("04")
+        Set-RegistryDword -Path $STORAGE_SENSE_USER_PATH -Name "04" -Value $RecycleBinDays
         Write-StatusMessage "Recycle Bin cleanup: Every $RecycleBinDays days" 'OK'
         
-        # Configure Downloads folder cleanup
+        # Configure Downloads folder cleanup ("08")
+        Set-RegistryDword -Path $STORAGE_SENSE_USER_PATH -Name "08" -Value $DownloadsDays
         if ($DownloadsDays -eq 0) {
-            Set-RegistryDword -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseDownloadsCleanupThreshold" -Value 0
             Write-StatusMessage "Downloads folder cleanup: DISABLED" 'INFO'
         } else {
-            Set-RegistryDword -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseDownloadsCleanupThreshold" -Value $DownloadsDays
             Write-StatusMessage "Downloads folder cleanup: Every $DownloadsDays days" 'OK'
         }
         
-        # Configure cloud content dehydration (optional, set to 60 days)
-        Set-RegistryDword -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseCloudContentDehydrationThreshold" -Value 60
+        # Configure cloud content dehydration (optional, set to 60 days) ("32")
+        Set-RegistryDword -Path $STORAGE_SENSE_USER_PATH -Name "32" -Value 60
         Write-StatusMessage "Cloud content dehydration: Every 60 days" 'OK'
         
-        Write-Host "`n    ✓ Storage Sense fully configured and active" -ForegroundColor Green
-        Write-Host "`n    ⚠️  NOTE: These Group Policy settings override user preferences" -ForegroundColor Yellow
-        Write-Host "      Users cannot change Storage Sense settings in Windows Settings UI" -ForegroundColor Gray
-        Write-Host "`n      To view current settings, users can go to:" -ForegroundColor Gray
+        Write-Host "`n    ✓ Storage Sense configured for current user" -ForegroundColor Green
+        Write-Host "      You can view these changes in:" -ForegroundColor Gray
         Write-Host "      Settings > System > Storage > Storage Sense" -ForegroundColor White
     }
     catch {
@@ -203,20 +211,22 @@ function Set-StorageSenseSettings {
 
 function Remove-StorageSenseSettings {
     Write-Host "`n========================================" -ForegroundColor Cyan
-    Write-Host "Removing Storage Sense Policy Settings" -ForegroundColor Cyan
+    Write-Host "Resetting Storage Sense User Settings" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     
     try {
-        Write-Host "`nRemoving Storage Sense policy configurations..." -ForegroundColor Yellow
+        Write-Host "`nRemoving Storage Sense user configurations..." -ForegroundColor Yellow
         
-        Remove-RegistryValue -Path $STORAGE_SENSE_POLICY -Name "AllowStorageSenseGlobal"
-        Remove-RegistryValue -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseRecycleBinCleanupThreshold"
-        Remove-RegistryValue -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseDownloadsCleanupThreshold"
-        Remove-RegistryValue -Path $STORAGE_SENSE_POLICY -Name "ConfigStorageSenseCloudContentDehydrationThreshold"
+        # Remove all configured keys to reset to default
+        Remove-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "01"
+        Remove-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "2048"
+        Remove-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "04"
+        Remove-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "08"
+        Remove-RegistryValue -Path $STORAGE_SENSE_USER_PATH -Name "32"
         
-        Write-StatusMessage "All Storage Sense policies removed" 'OK'
-        Write-Host "`n    ✓ Storage Sense is no longer controlled by Group Policy" -ForegroundColor Green
-        Write-Host "      Users can now configure it manually in Settings" -ForegroundColor Gray
+        Write-StatusMessage "All Storage Sense user settings removed" 'OK'
+        Write-Host "`n    ✓ Storage Sense is now reset to defaults" -ForegroundColor Green
+        Write-Host "      User can configure it manually in Settings" -ForegroundColor Gray
     }
     catch {
         Write-StatusMessage "Error removing Storage Sense settings: $($_.Exception.Message)" 'ERROR'
@@ -226,7 +236,7 @@ function Remove-StorageSenseSettings {
 
 # --- Main ---
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "Storage Sense Configuration Tool" -ForegroundColor Cyan
+Write-Host "Storage Sense Configuration Tool (User Level)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 # Validate Windows version
@@ -248,7 +258,7 @@ Show-StorageSenseStatus
 
 # Footer
 Write-Host "`n========================================" -ForegroundColor Cyan
-$lastEditedTimestamp = "2025-11-03 12:45:00" 
+$lastEditedTimestamp = "2025-11-04 12:18:00" 
 Write-Host "Last Edited: $lastEditedTimestamp" -ForegroundColor Green
 Write-Host "www.AIIT.support All rights reserved" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
@@ -257,14 +267,14 @@ if (-not $Disable) {
     Write-Host "`nADDITIONAL NOTES:" -ForegroundColor Yellow
     Write-Host "- Storage Sense will run automatically in the background" -ForegroundColor White
     Write-Host "- You can manually trigger it from Settings > System > Storage" -ForegroundColor White
-    Write-Host "- These are Group Policy settings - users cannot override them" -ForegroundColor White
-    Write-Host "- To disable, run this script with the -Disable parameter" -ForegroundColor White
+    Write-Host "- These settings can be changed by the user in Settings" -ForegroundColor White
+    Write-Host "- To reset, run this script with the -Disable parameter" -ForegroundColor White
     Write-Host "`nEXAMPLES:" -ForegroundColor Yellow
-    Write-Host "  .\05-Settings_Win11.ps1 -Disable" -ForegroundColor Gray
-    Write-Host "  .\05-Settings_Win11.ps1 -RecycleBinDays 14 -DownloadsDays 30" -ForegroundColor Gray
+    Write-Host "  .\05-Settings_Win11_User.ps1 -Disable" -ForegroundColor Gray
+    Write-Host "  .\05-Settings_Win11_User.ps1 -RecycleBinDays 14 -DownloadsDays 30" -ForegroundColor Gray
 } else {
     Write-Host "`nADDITIONAL NOTES:" -ForegroundColor Yellow
-    Write-Host "- Storage Sense policies have been removed" -ForegroundColor White
-    Write-Host "- Users can now configure Storage Sense in Windows Settings" -ForegroundColor White
-    Write-Host "- To re-enable with policy, run this script without -Disable" -ForegroundColor White
+    Write-Host "- Storage Sense user settings have been reset" -ForegroundColor White
+    Write-Host "- User can now configure Storage Sense in Windows Settings" -ForegroundColor White
+    Write-Host "- To re-enable, run this script without -Disable" -ForegroundColor White
 }
