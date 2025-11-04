@@ -288,6 +288,8 @@ function Optimize-VisualEffects {
 
 # --- 5. Advanced Diagnostics ---
 
+# NOTE: Start-DiskCheck is NOT called automatically in this script
+# It can be manually enabled if needed by uncommenting it in the main execution section
 function Start-DiskCheck {
     Write-SectionHeader "Disk Error Check" "🔍"
 
@@ -536,8 +538,12 @@ try {
     Disable-StartupApps
     Optimize-VisualEffects
 
-    # Advanced Diagnostics
-    Start-DiskCheck
+    # Advanced Diagnostics and Remediation Sequence:
+    # 1. Check System Files (Primary): sfc /scannow
+    # 2. IF sfc finds issues: Re-run sfc /scannow
+    # 3. IF sfc reports unfixable errors: DISM /Online /Cleanup-Image /RestoreHealth
+    # 4. IF DISM reports issues: mdsched.exe (Windows Memory Diagnostic)
+    # NOTE: chkdsk /f is NOT run automatically as it requires a restart
 
     $sfcResult = Test-SystemFiles
     if (-not $sfcResult) {
@@ -581,10 +587,9 @@ try {
 
     if ($script:RestartRequired) {
         Write-Host "`n  ⚠️  RESTART REQUIRED" -ForegroundColor Yellow
-        Write-Host "    Some maintenance tasks require a system restart:" -ForegroundColor Gray
-        Write-Host "    • Disk check (chkdsk)" -ForegroundColor Gray
-        Write-Host "    • Memory diagnostics (if scheduled)" -ForegroundColor Gray
-        Write-Host "`n    Restart your computer when convenient to complete maintenance" -ForegroundColor White
+        Write-Host "    Windows Memory Diagnostic has been scheduled" -ForegroundColor Gray
+        Write-Host "    The system will restart and run memory tests" -ForegroundColor Gray
+        Write-Host "`n    Restart your computer when convenient to complete diagnostics" -ForegroundColor White
     }
 
     Write-Host "`n" -NoNewline
