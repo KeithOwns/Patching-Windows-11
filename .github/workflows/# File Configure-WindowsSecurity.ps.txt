@@ -1,0 +1,277 @@
+# File: Configure-WindowsSecurity.ps1
+# Purpose: Configure Windows Security controls. No data encryption code included.
+# Requires: Windows 11 22H2+, PowerShell 5.1+, admin
+
+param(
+  [switch]$UnmanagePhishing  # If set, clear WTDS policies so UI isn't "managed by your administrator"
+)
+
+# --- helpers ---
+$Result = @()
+$script:ChangedAny = $false
+$script:RebootReasons = New-Object System.Collections.Generic.List[string]
+
+function Log([string]$m){ $script:Result += $m }
+function Ensure-Key([string]$Path){
+  if(-not (Test-Path -LiteralPath $Path)){ New-Item -Path $Path -Force | Out-Null }
+}
+function Get-REG([string]$Path,[string]$Name){
+  try{ (Get-ItemProperty -Path $Path -Name $Name -EA SilentlyContinue).$Name }catch{ $null }
+}
+function Set-DWORD([string]$Path,[string]$Name,[int]$Value){
+  # Why: track changes for status/reboot.
+  Ensure-Key $Path
+  $cur = Get-REG $Path $Name
+  if($cur -ne $Value){
+    if($null -eq $cur){
+      New-ItemProperty -Path $Path -Name $Name -PropertyType DWord -Value $Value -Force | Out-Null
+    } else {
+      Set-ItemProperty -Path $Path -Name $Name -Value $Value | Out-Null
+    }
+    $script:ChangedAny = $true
+    return $true
+  }
+  return $false
+}
+function To-OnOff($val){ if($val -eq 1){ 'On' } else { 'Off' } }
+
+function Get-SacState {
+  try{
+    $s = (Get-MpComputerStatus -EA Stop | Select-Object -ExpandProperty SmartAppControlState -EA Stop)
+    if([string]::IsNullOrWhiteSpace($s)){ '-' } else { $s }
+  } catch {
+    $pol = "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy"
+    $v = Get-REG $pol 'VerifiedAndReputablePolicyState'
+    switch($v){
+      1 { 'On' }
+      2 { 'Eval' }
+      0 { 'Off' }
+      default { '-' }
+    }
+  }
+}
+
+function Refresh-PhishingUI {
+  param([switch]$OnlyIfInteractive)
+  try{
+    if($OnlyIfInteractive -and -not ([Environment]::UserInteractive)){ return }
+    Start-Process "windowsdefender://reputationbased" -ErrorAction Stop | Out-Null
+    Log "UI refresh: opened Windows Security → Reputation-based protection"
+  } catch {
+    try{
+      Start-Process "windowsdefender://appbrowsercontrol" | Out-Null
+      Log "UI refresh: opened Windows Security → App & browser control"
+    } catch {
+      try{
+        Start-Process "ms-settings:windowsdefender" | Out-Null
+        Log "UI refresh: opened Windows Security main Settings"
+      } catch {
+        Log "UI refresh: FAILED ($($_.Exception.Message))"
+      }
+    }
+  }
+}
+
+# --- prechecks ---
+$IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if(-not $IsAdmin){ Write-Error "Run elevated. HKLM policy writes require admin."; return }
+$build = [Environment]::OSVersion.Version.Build
+if($build -lt 22621){ Write-Warning "Some policies target Windows 11 22H2+." }
+
+Write-Host "Run: $(Get-Date -Format 'u')"
+Write-Host "User: $env:USERNAME  Computer: $env:COMPUTERNAME"
+Write-Host "------------------------------------------------------------"
+Write-Host "REMINDER: Data encryption is intentionally omitted. After Windows Security automation is complete, return to add it, then proceed to Windows Update automation."
+
+# --- Smart App Control (report-only; first) ---
+try{
+  $sac = Get-SacState
+  Log "UI · Smart App Control: $sac"
+} catch {
+  Log "Smart App Control: FAILED ($($_.Exception.Message))"
+}
+
+# --- 1) Enhanced Phishing Protection (policy) + UI-mapped status ---
+try{
+  $wtds = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WTDS\Components"
+  $policyChanged = $false
+
+  if($UnmanagePhishing){
+    foreach($n in 'ServiceEnabled','NotifyMalicious','NotifyPasswordReuse','NotifyUnsafeApp','CaptureThreatWindow'){
+      if(Test-Path $wtds){
+        try{
+          $before = Get-REG $wtds $n
+          if($null -ne $before){
+            Remove-ItemProperty -Path $wtds -Name $n -ErrorAction SilentlyContinue
+            $policyChanged = $true
+          }
+        } catch {}
+      }
+    }
+    if($policyChanged){ Log "Enhanced Phishing Protection policies: CLEARED (UI no longer managed after refresh)" }
+  } else {
+    # Enforce with Password Reuse = Off
+    $policyChanged = (Set-DWORD $wtds 'ServiceEnabled'       1) -or $policyChanged
+    $policyChanged = (Set-DWORD $wtds 'NotifyMalicious'      1) -or $policyChanged
+    $policyChanged = (Set-DWORD $wtds 'NotifyPasswordReuse'  0) -or $policyChanged  # Off per request
+    $policyChanged = (Set-DWORD $wtds 'NotifyUnsafeApp'      1) -or $policyChanged
+  }
+
+  # Read back for UI map
+  $svc   = Get-REG $wtds 'ServiceEnabled'
+  $mal   = Get-REG $wtds 'NotifyMalicious'
+  $reuse = Get-REG $wtds 'NotifyPasswordReuse'
+  $unsafe= Get-REG $wtds 'NotifyUnsafeApp'
+  $cap   = Get-REG $wtds 'CaptureThreatWindow'  # “Automatically collect…”
+
+  if(-not $UnmanagePhishing){
+    $ok = ($svc -eq 1) -and ($mal -eq 1) -and ($reuse -eq 0) -and ($unsafe -eq 1)
+    if($ok){ Log "Enhanced Phishing Protection: managed via policy — expected states set SUCCESS" }
+    else  { Log "Enhanced Phishing Protection: managed via policy — policy mismatch FAILED" }
+  }
+
+  # UI-mapped lines
+  Log "UI · Phishing protection: $(To-OnOff $svc)"
+  Log "UI · Warn me about malicious apps and sites: $(To-OnOff $mal)"
+  Log "UI · Warn me about password reuse: $(To-OnOff $reuse)"
+  Log "UI · Warn me about unsafe app in Windows: $(To-OnOff $unsafe)"
+  Log "UI · Automatically collect information from websites and apps: $(To-OnOff $cap)"
+
+  if($policyChanged){ Refresh-PhishingUI -OnlyIfInteractive }
+} catch {
+  Log "Enhanced Phishing Protection: FAILED ($($_.Exception.Message))"
+}
+
+# --- 2) SmartScreen for Microsoft Store apps ---
+try{
+  $mach = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost"
+  $user = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost"
+  Set-DWORD $mach 'EnableWebContentEvaluation' 1 | Out-Null
+  Set-DWORD $user 'EnableWebContentEvaluation' 1 | Out-Null
+
+  $mcur = Get-REG $mach 'EnableWebContentEvaluation'
+  $ucur = Get-REG $user 'EnableWebContentEvaluation'
+  if($mcur -eq 1 -and $ucur -eq 1){
+    Log "Store apps SmartScreen: All required policies set SUCCESS"
+  } else {
+    Log "Store apps SmartScreen: HKLM=$mcur; HKCU=$ucur FAILED"
+  }
+} catch { Log "Store apps SmartScreen: FAILED ($($_.Exception.Message))" }
+
+# --- 3) Core Isolation (VBS, Memory integrity, Kernel Stack, Blocklist) ---
+try{
+  $dgRoot   = "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard"
+  $hvciKey  = Join-Path $dgRoot "Scenarios\HypervisorEnforcedCodeIntegrity"
+  $kssKey   = Join-Path $dgRoot "Scenarios\KernelShadowStacks"
+  $ciCfg    = "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config"
+
+  $chgVbs = Set-DWORD $dgRoot 'EnableVirtualizationBasedSecurity' 1
+  $chgPlat= Set-DWORD $dgRoot 'RequirePlatformSecurityFeatures'   1
+  $chgHvci= Set-DWORD $hvciKey 'Enabled'                          1
+  Set-DWORD $dgRoot 'Locked' 0 | Out-Null
+  Set-DWORD $hvciKey 'Locked' 0 | Out-Null
+  $chgKss = Set-DWORD $kssKey 'Enabled'                           1
+  Set-DWORD $ciCfg  'VulnerableDriverBlocklistEnable'             1 | Out-Null
+
+  if($chgVbs -or $chgHvci -or $chgKss){ [void]$script:RebootReasons.Add("Core Isolation (VBS/HVCI/KSS)") }
+
+  $checks = @(
+    @{N='EnableVirtualizationBasedSecurity'; V=(Get-REG $dgRoot  'EnableVirtualizationBasedSecurity'); Want=1}
+    @{N='RequirePlatformSecurityFeatures';   V=(Get-REG $dgRoot  'RequirePlatformSecurityFeatures');   Want=1}
+    @{N='HVCI.Enabled';                      V=(Get-REG $hvciKey 'Enabled');                           Want=1}
+    @{N='KernelShadowStacks.Enabled';        V=(Get-REG $kssKey  'Enabled');                           Want=1}
+    @{N='VulnerableDriverBlocklistEnable';   V=(Get-REG $ciCfg   'VulnerableDriverBlocklistEnable');   Want=1}
+  )
+  $noncompliant = $checks | Where-Object { $_.V -ne $_.Want }
+  if($null -eq $noncompliant -or $noncompliant.Count -eq 0){
+    Log "Core Isolation: All required policies set SUCCESS"
+  } else {
+    $detail = ($noncompliant | ForEach-Object { "$($_.N)=$($_.V)" }) -join ', '
+    Log "Core Isolation: $detail FAILED"
+  }
+} catch { Log "Core Isolation: FAILED ($($_.Exception.Message))" }
+
+# --- 4) Local Security Authority (LSA) protection ---
+try{
+  $lsa = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+  $chg1 = Set-DWORD $lsa 'RunAsPPL'     1
+  $chg2 = Set-DWORD $lsa 'RunAsPPLBoot' 1
+  if($chg1 -or $chg2){ [void]$script:RebootReasons.Add("LSA protection") }
+
+  $ppl  = Get-REG $lsa 'RunAsPPL'
+  $pplb = Get-REG $lsa 'RunAsPPLBoot'
+  if(($ppl -eq 1 -or $ppl -eq 2) -and ($pplb -eq 1 -or $null -eq $pplb)){
+    Log "LSA protection: RunAsPPL=$ppl; RunAsPPLBoot=$pplb SUCCESS"
+  } else {
+    Log "LSA protection: RunAsPPL=$ppl; RunAsPPLBoot=$pplb FAILED"
+  }
+} catch { Log "LSA protection: FAILED ($($_.Exception.Message))" }
+
+# --- Summary ---
+# Split into (A) operational results and (B) UI status lines
+$opItems = foreach($line in $Result){
+  if($line -like 'UI ·*'){ continue }
+  if($line -match '^(.*)\s+(SUCCESS|FAILED)$'){
+    [pscustomobject]@{
+      Text   = $matches[1]
+      Status = $matches[2]
+    }
+  } elseif($line -match '^(.*?):\s*(SUCCESS|FAILED)(.*)$'){
+    # Normalize older "Section: SUCCESS details" shapes
+    [pscustomobject]@{
+      Text   = ("{0}:{1}" -f $matches[1], $matches[3]).Trim()
+      Status = $matches[2]
+    }
+  } else {
+    [pscustomobject]@{ Text = $line; Status = $null }
+  }
+}
+
+$uiItems = foreach($line in $Result){
+  if($line -notlike 'UI ·*'){ continue }
+  if($line -match '^UI ·\s*(.*?):\s*(.+)$'){
+    [pscustomobject]@{
+      Name  = $matches[1]
+      State = $matches[2]
+    }
+  }
+}
+
+# Compute right-aligned status column for operational items
+$maxTextLen = ($opItems | ForEach-Object { $_.Text.Length } | Measure-Object -Maximum).Maximum
+if(-not $maxTextLen){ $maxTextLen = 0 }
+
+$succ = ($opItems | Where-Object { $_.Status -eq 'SUCCESS' }).Count
+$fail = ($opItems | Where-Object { $_.Status -eq 'FAILED'  }).Count
+
+Write-Host "`n================ SUMMARY =================="
+foreach($it in $opItems){
+  if($it.Status){
+    $pad = ' ' * (($maxTextLen - $it.Text.Length) + 2)
+    Write-Host ("- {0}{1}{2}" -f $it.Text, $pad, $it.Status)
+  } else {
+    Write-Host ("- {0}" -f $it.Text)
+  }
+}
+Write-Host ("Result: {0} success, {1} failed" -f $succ, $fail)
+
+# UI status table with aligned State column
+if($uiItems.Count -gt 0){
+  $maxNameLen = ($uiItems | ForEach-Object { $_.Name.Length } | Measure-Object -Maximum).Maximum
+  if(-not $maxNameLen){ $maxNameLen = 0 }
+  Write-Host "`n---------------- UI STATUS ----------------"
+  foreach($u in $uiItems){
+    $pad = ' ' * (($maxNameLen - $u.Name.Length) + 2)
+    Write-Host ("- {0}{1}{2}" -f $u.Name, $pad, $u.State)
+  }
+}
+
+if($RebootReasons.Count -gt 0){
+  $r = ($RebootReasons | Select-Object -Unique) -join '; '
+  Write-Host "`nReboot may be required to complete: $r"
+}
+Write-Host "============================================`n"
+Write-Host "REMINDER: After finishing Windows Security automation, return to add Data Encryption. After that, start Windows Update automation."
+
+$global:LASTEXITCODE = if($fail -gt 0){ 1 } else { 0 }
+return

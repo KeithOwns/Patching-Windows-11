@@ -1,0 +1,43 @@
+Registry Editor:
+Hide local 'admin'
+HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\
+SpecialAccounts\UserList\admin
+Reduce number of thumbnail previews in taskbar (non-admin)
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband\NumThumbnails
+
+Get-AppxPackage -allusers Microsoft.WindowsStore | Remove-AppxPackage
+iex(irm https://cdn.jsdelivr.net/gh/he3als/EdgeRemover@main/get.ps1)
+
+Delete incompatible drivers (Memory Integrity>Core Isolation)
+pnputil /delete-driver [driver name].inf
+
+CMD: 
+cd "C:\Program Files\Palo Alto Networks\GlobalProtect"
+pangps -registerplap
+
+Maintenance--
+Defrag / Trim
+dfrgui
+System File Checker
+sfc /scannow
+Check Disk
+chkdsk /f
+Run an online repair
+DISM /Online /Cleanup-Image /RestoreHealth
+Computer Policy update
+gpupdate
+Diagnose memory
+mdsched
+Scan for Akira RW
+C:\>dir *akira*.* /s
+Clean up
+cleanmgr /verylowdisk
+Manually add program to startup
+shell:startup
+Copy in shortcut
+
+Enter sleep state after 5 minutes powershell script
+timeout /t 300 /nobreak & RUNDLL32.EXE powrprof.dll,SetSuspendState 0,1,0
+
+Create System Restore Point
+wmic.exe /Namespace:\\root\default Path SystemRestore Call CreateRestorePoint "O&O", 100, 7
