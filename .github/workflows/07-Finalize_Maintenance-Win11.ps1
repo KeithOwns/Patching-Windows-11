@@ -133,8 +133,12 @@ function Optimize-Disks {
                 $partition = Get-Partition -DriveLetter $drive -ErrorAction SilentlyContinue
                 if ($partition) {
                     $disk = Get-Disk -Number $partition.DiskNumber -ErrorAction SilentlyContinue
-                    if ($disk -and $disk.MediaType -eq 'SSD') {
-                        $isSSD = $true
+                    if ($disk) {
+                        # Check if MediaType property exists before accessing it
+                        $mediaTypeProperty = $disk.PSObject.Properties | Where-Object { $_.Name -eq 'MediaType' }
+                        if ($mediaTypeProperty -and $disk.MediaType -eq 'SSD') {
+                            $isSSD = $true
+                        }
                     }
                 }
 
