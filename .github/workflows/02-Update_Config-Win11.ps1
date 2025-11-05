@@ -212,6 +212,98 @@ Write-Host ("═" * 60) -ForegroundColor Blue
 Set-WUSettings
 Show-WUStatus
 
+# --- Microsoft Store Updates ---
+Write-SectionHeader "Microsoft Store Updates" "🏪"
+
+Write-Host "`n  Opening Microsoft Store to check for app updates..." -ForegroundColor Yellow
+
+try {
+    # Load UI Automation assemblies
+    Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+    Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+
+    # Open MS Store to Downloads and Updates page
+    Write-Host "  • Launching Microsoft Store..." -ForegroundColor Gray
+    Start-Process "ms-windows-store://downloadsandupdates"
+
+    # Wait for the Store app to open and load
+    Write-Host "  • Waiting for Microsoft Store to load..." -ForegroundColor Gray
+    Start-Sleep -Seconds 3
+
+    # Try to find and click the "Get updates" button
+    try {
+        # Get the root automation element
+        $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+
+        # Find the Microsoft Store window
+        $condition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            "Microsoft Store"
+        )
+
+        $storeWindow = $desktop.FindFirst(
+            [System.Windows.Automation.TreeScope]::Children,
+            $condition
+        )
+
+        if ($storeWindow -eq $null) {
+            Write-Host "  ✗ Could not find Microsoft Store window" -ForegroundColor Yellow
+            Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
+        } else {
+            Write-Host "  ✓ Found Microsoft Store window" -ForegroundColor Green
+
+            # Wait a bit more for the page to fully load
+            Start-Sleep -Seconds 2
+
+            # Search for the "Get updates" button
+            $buttonTexts = @("Get updates", "Check for updates", "Update all")
+            $buttonFound = $false
+
+            foreach ($buttonText in $buttonTexts) {
+                $buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
+                    [System.Windows.Automation.AutomationElement]::NameProperty,
+                    $buttonText
+                )
+
+                $button = $storeWindow.FindFirst(
+                    [System.Windows.Automation.TreeScope]::Descendants,
+                    $buttonCondition
+                )
+
+                if ($button -ne $null) {
+                    Write-Host "  ✓ Found '$buttonText' button" -ForegroundColor Green
+
+                    # Get the Invoke pattern to click the button
+                    $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+
+                    if ($invokePattern -ne $null) {
+                        Write-Host "  • Clicking '$buttonText' button..." -ForegroundColor Cyan
+                        $invokePattern.Invoke()
+                        Write-Host "  ✓ Successfully initiated Microsoft Store update check!" -ForegroundColor Green
+                        $buttonFound = $true
+                        break
+                    }
+                }
+            }
+
+            if (-not $buttonFound) {
+                Write-Host "  ✗ Could not find the update button" -ForegroundColor Yellow
+                Write-Host "    The button may have a different name or the page is still loading" -ForegroundColor Gray
+                Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
+            }
+        }
+
+    } catch {
+        Write-Host "  ✗ UI Automation error: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
+    }
+
+} catch {
+    Write-Host "  ✗ Could not load UI Automation assemblies" -ForegroundColor Yellow
+    Write-Host "    Error: $($_.Exception.Message)" -ForegroundColor Gray
+    Write-Host "    Microsoft Store opened - please manually check for updates" -ForegroundColor Gray
+}
+
 # Footer
 # $elapsed = ((Get-Date) - $script:StartTime).TotalSeconds
 Write-Host "`n" -NoNewline
@@ -221,7 +313,7 @@ Write-Host ("─" * 60) -ForegroundColor DarkGray
 # Write-Host ""
 # Write-Host ("─" * 60) -ForegroundColor DarkGray
 # Set the timestamp this script was last edited
-$lastEditedTimestamp = "2025-11-03 16:05:00" 
+$lastEditedTimestamp = "2025-11-04"
 Write-Host "Last Edited: $lastEditedTimestamp" -ForegroundColor Green
 Write-Host "www.AIIT.support all rights reserved" -ForegroundColor Green
 Write-Host ("─" * 60) -ForegroundColor DarkGray
