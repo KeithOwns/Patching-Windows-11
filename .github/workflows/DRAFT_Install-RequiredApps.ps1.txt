@@ -1,0 +1,608 @@
+# file: Install-RequiredApps.ps1
+param(
+    [ValidateSet('Desktop','Laptop','Auto')]
+    [string]$DeviceType = 'Auto'
+)
+<#
+.SYNOPSIS
+  Installs a list of required applications in a guided process.
+
+.DESCRIPTION
+  Verifies prerequisite apps if defined. Then installs remaining software.
+  Fork: Desktop vs Laptop (AirMedia for Laptop).
+
+.NOTES
+  Requires winget >= 1.5.0.
+#>
+
+function Write-Stamp {
+  param([string]$Tag = "")
+  $who = "Keith â€” GPT-5 Thinking"
+  $ts  = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
+  if ([string]::IsNullOrWhiteSpace($Tag)) { Write-Host "[$ts] $who" -ForegroundColor DarkGray }
+  else { Write-Host "[$ts] $who â€” $Tag" -ForegroundColor DarkGray }
+}
+
+# --- PREREQUISITE CHECK ---
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  Write-Warning "This script must be run with Administrator privileges."
+  Write-Host "Right-click the script and select 'Run as administrator'."
+  Write-Stamp "Admin check failed"
+  return
+}
+
+# --- [NEW] CONFIGURE DEFENDER SETTINGS ---
+Write-Host "`n--------------------------------------------------"
+Write-Host "Checking 'Controlled Folder Access' status..." -ForegroundColor Yellow
+Write-Stamp "Checking Controlled Folder Access"
+$oldErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'Stop'
+    # Try to disable Controlled Folder Access
+    Set-MpPreference -EnableControlledFolderAccess Disabled
+    
+    # Verify the setting
+    $newPrefs = Get-MpPreference
+    if ($newPrefs.EnableControlledFolderAccess -eq 0) {
+        Write-Host "[SUCCESS] Controlled Folder Access has been disabled." -ForegroundColor Green
+        Write-Stamp "Controlled Folder Access disabled"
+    } else {
+        Write-Host "[INFO] Controlled Folder Access is managed by policy (current state: $($newPrefs.EnableControlledFolderAccess))." -ForegroundColor Cyan
+        Write-Stamp "Controlled Folder Access managed by policy"
+    }
+} catch {
+    if ($_.Exception.Message -match '0x800106ba') {
+        Write-Host "[INFO] Controlled Folder Access is managed by Group Policy or Intune." -ForegroundColor Cyan
+        Write-Stamp "Controlled Folder Access managed by GPO/Intune"
+    } else {
+        Write-Warning "Could not check Controlled Folder Access: $($_.Exception.Message)"
+        Write-Stamp "Error checking Controlled Folder Access: $($_.Exception.Message)"
+    }
+} finally {
+    $ErrorActionPreference = $oldErrorActionPreference
+}
+Write-Host "--------------------------------------------------`n"
+# --- [END NEW] ---
+
+# --- SETTINGS ---
+$MinWingetVersion = [version]'1.5.0'
+$StartTime = Get-Date
+$TranscriptLogPath = Join-Path -Path ([Environment]::GetFolderPath('Desktop')) -ChildPath ("App-Install-Transcript-{0:yyyyMMdd-HHmmss}.txt" -f $StartTime)
+$SummaryLogPath    = Join-Path -Path ([Environment]::GetFolderPath('Desktop')) -ChildPath ("App-Install-Summary-{0:yyyyMMdd-HHmmss}.txt" -f $StartTime)
+Start-Transcript -Path $TranscriptLogPath -Append
+$Summary = [System.Collections.Generic.List[object]]::new()
+$SoftSuccessCodes = @(0,3010,-2145124332,0x8024001E,0x8024200B)
+$ScriptExitCode = 0
+$PolicyBlockedCode = -1978335217  # 0x8A15000F - APPINSTALLER_CLI_ERROR_BLOCKED_BY_POLICY
+
+# --- BASE CONFIGURATION (Alphabetical by AppName) ---
+$BaseApps = @(
+  @{ AppName="Adobe Creative Cloud"; MatchName="*Adobe Creative Cloud*"; Type="WINGET"; CheckMethod="Registry"; WingetId="Adobe.CreativeCloud"; InstallOrder=50; ManualUrl="https://creativecloud.adobe.com/apps/download/creative-cloud" },
+  @{ AppName="Box";                  MatchName="Box";                  Type="MSI";    CheckMethod="Registry"; InstallOrder=40; Url="https://e3.boxcdn.net/box-installers/desktop/releases/win/Box-x64.msi" },
+  @{ AppName="Box for Office";       MatchName="*Box for Office*";     Type="EXE";    CheckMethod="Registry"; InstallOrder=41; Url="https://e3.boxcdn.net/box-installers/boxforoffice/currentrelease/BoxForOffice.exe"; SilentArgs="/quiet /norestart" },
+  @{ AppName="Box Tools";            MatchName="*Box Tools*";          Type="EXE";    CheckMethod="Registry"; InstallOrder=42; Url="https://e3.boxcdn.net/box-installers/boxedit/win/currentrelease/BoxToolsInstaller.exe"; SilentArgs="/quiet /norestart ALLUSERS=1" }
+)
+
+# --- CONDITIONAL MODULES ---
+$AirMediaModule = @{
+  AppName      = "Crestron AirMedia"
+  MatchName    = "*AirMedia*"
+  Type         = "WINGET"
+  CheckMethod  = "Registry"
+  WingetScope  = 'Machine'
+  WingetId     = "Crestron.AirMedia"
+  ManualUrl    = "https://www.crestron.com/Products/Featured-Solutions/AirMedia"
+  ManualUrl    = "https://www.crestron.com/Products/Featured-Solutions/AirMedia"
+  InstallOrder = 100
+}
+
+# --- FUNCTIONS ---
+function Add-Tls {
+  if ([Net.ServicePointManager]::SecurityProtocol -notmatch 'Tls12|Tls13') {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13 }
+    catch {
+      Write-Verbose "Could not enable TLS 1.3, using TLS 1.2 only: $($_.Exception.Message)"
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    }
+  }
+}
+
+function Test-AppConfiguration {
+  [CmdletBinding()]
+  param([Parameter(Mandatory)][hashtable]$App)
+  $errors = @()
+  if (-not $App.ContainsKey('AppName') -or [string]::IsNullOrWhiteSpace($App.AppName)) { $errors += "Missing required field: AppName" }
+  if ($App.ContainsKey('IsPrerequisite') -and $App.IsPrerequisite) { return $true }
+  if (-not $App.ContainsKey('Type')) { $errors += "Missing required field: Type for app '$($App.AppName)'" }
+  if ($App.Type -eq 'WINGET' -and -not $App.ContainsKey('WingetId')) { $errors += "WINGET type requires WingetId for app '$($App.AppName)'" }
+  if (($App.Type -eq 'MSI' -or $App.Type -eq 'EXE') -and -not ($App.ContainsKey('Url') -or $App.ContainsKey('Urls') -or $App.ContainsKey('InstallerPath'))) {
+    $errors += "$($App.Type) type requires Url, Urls, or InstallerPath for app '$($App.AppName)'"
+  }
+  if ($errors.Count -gt 0) { Write-Error "Configuration errors:`n$($errors -join "`n")"; return $false }
+  return $true
+}
+
+function Get-File {
+  [CmdletBinding()]
+  param([Parameter(Mandatory)][string]$Url,[Parameter(Mandatory)][string]$Out)
+  Add-Tls
+  Write-Host "Downloading from: $Url" -ForegroundColor Gray
+  for ($i=1; $i -le 3; $i++) {
+    try {
+      $ProgressPreference = 'SilentlyContinue'
+      Invoke-WebRequest -Uri $Url -OutFile $Out -UseBasicParsing -ErrorAction Stop
+      $ProgressPreference = 'Continue'
+      if (Test-Path $Out) {
+        $fileSize = (Get-Item $Out).Length
+        Write-Host "Download complete: $([math]::Round($fileSize/1MB,2)) MB" -ForegroundColor Gray
+      }
+      return
+    } catch {
+      if ($i -lt 3) { Write-Warning "Download attempt $i failed. Retrying in $($i*10) seconds..."; Start-Sleep -Seconds (10*$i) }
+      else { throw "Download failed after 3 attempts: $($_.Exception.Message)" }
+    }
+  }
+}
+
+function Get-MsiUrlFromLanding {
+  param([Parameter(Mandatory)][string]$LandingUrl)
+  Add-Tls
+  $html = Invoke-WebRequest -Uri $LandingUrl -UseBasicParsing -ErrorAction Stop
+  $msi = ($html.Links | Where-Object { $_.href -match '\.msi($|\?)' } | Select-Object -First 1).href
+  if (-not $msi) { throw "No MSI link found at: $LandingUrl" }
+  if ($msi -notmatch '^https?://') {
+    $uri = [Uri]$LandingUrl; $base = "$($uri.Scheme)://$($uri.Host)"
+    $msi = if ($msi.StartsWith('/')) { "$base$msi" } else { "$base/$msi" }
+  }
+  return $msi
+}
+
+function Ensure-WingetSources {
+  try {
+    Write-Host "Checking Windows Package Manager sources..." -ForegroundColor Yellow
+    $null = Start-Process -FilePath "winget.exe" -ArgumentList @("source","update","--disable-interactivity") -Wait -PassThru -ErrorAction SilentlyContinue
+    $en = Start-Process -FilePath "winget.exe" -ArgumentList @("source","enable","msstore","--disable-interactivity") -Wait -PassThru -ErrorAction SilentlyContinue
+    if ($en -and $en.ExitCode -ne 0) {
+      Start-Process -FilePath "winget.exe" -ArgumentList @("source","add","-n","msstore","-a","https://storeedgefd.dsx.mp.microsoft.com/v9.0","--disable-interactivity") -Wait -ErrorAction SilentlyContinue | Out-Null
+    }
+    Write-Host "Winget sources ready." -ForegroundColor Green
+  } catch { Write-Warning "Winget source prep failed: $($_.Exception.Message)" }
+}
+
+function Assert-WingetVersion {
+  param([Parameter(Mandatory)][version]$Minimum)
+  $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+  if (-not $winget) { Write-Error "Windows Package Manager (winget) not installed. Install 'App Installer' from Microsoft Store, then re-run."; return $false }
+  try { $raw = & winget --version 2>$null; $verText = ($raw | Select-Object -First 1).ToString().Trim().TrimStart('v','V'); $ver = [version]$verText }
+  catch { Write-Error "Unable to determine winget version."; return $false }
+  if ($ver -lt $Minimum) { Write-Error "winget $verText detected. Version $($Minimum.ToString()) or newer required."; return $false }
+  Write-Host "winget $verText OK." -ForegroundColor Green
+  return $true
+}
+
+function Test-AppInstalled {
+  [CmdletBinding()]
+  param([Parameter(Mandatory)][hashtable]$App)
+
+  if ($App.ContainsKey('CheckMethod') -and $App.CheckMethod -eq 'Appx') {
+    $name = if ($App.ContainsKey('AppxName') -and $App.AppxName) { $App.AppxName } elseif ($App.ContainsKey('MatchName') -and $App.MatchName) { $App.MatchName } else { $App.AppName }
+    $pkg = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $name -or $_.PackageFamilyName -like "$name*" -or $_.Name -like "$name*" } | Select-Object -First 1
+    return [bool]$pkg
+  }
+
+  if ($App.ContainsKey('CheckMethod') -and $App.CheckMethod -eq 'File') {
+    $path = if ($App.ContainsKey('FilePath')) { $App['FilePath'] } else { $null }
+    return ([bool]$path -and (Test-Path -Path $path))
+  }
+
+  $scope = if ($App.ContainsKey('RegistryScope')) { $App.RegistryScope } else { 'Machine' }
+  $roots = @()
+  if ($scope -eq 'Machine' -or $scope -eq 'All') {
+    $roots += "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+    $roots += "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+  }
+  if ($scope -eq 'User' -or $scope -eq 'All') {
+    $roots += "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+    $roots += "HKCU:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+  }
+
+  $pattern = if ($App.ContainsKey('MatchName')) { $App.MatchName } else { $App.AppName }
+  foreach ($r in $roots) {
+    if (-not (Test-Path $r)) { continue }
+    foreach ($k in (Get-ChildItem $r -ErrorAction SilentlyContinue)) {
+      $dn = $k.GetValue('DisplayName',$null)
+      if ($dn -and ($dn -like $pattern)) { return $true }
+    }
+  }
+  return $false
+}
+
+function Invoke-UserWinget {
+  param([Parameter(Mandatory)][string[]]$Args)
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "powershell.exe"
+  $psi.Arguments = "-NoLogo -NoProfile -Command `"winget $($Args -join ' ')`""
+  $psi.UseShellExecute = $true
+  $psi.Verb = "Open"
+  try { [Diagnostics.Process]::Start($psi) | Out-Null; return 0 }
+  catch { Write-Warning "Failed to start user-context winget: $($_.Exception.Message)"; return 1 }
+}
+
+# --- PATCH: resilient winget install ---
+# --- PATCH: resilient winget install ---
+function Install-WithWingetRetry {
+  param([Parameter(Mandatory)][hashtable]$App)
+  $base = @("install","--id",$App.WingetId,"-e","--accept-package-agreements","--accept-source-agreements","--silent","--disable-interactivity")
+  if ($App.ContainsKey('Source') -and $App.Source) { $base += @("--source",$App.Source) }
+
+  # Attempt 1: honor provided scope if present
+  $args1 = @($base)
+  if ($App.ContainsKey('WingetScope') -and $App.WingetScope) { $args1 += @("--scope",$App.WingetScope) }
+  $p1 = Start-Process -FilePath "winget.exe" -ArgumentList $args1 -Wait -PassThru -ErrorAction SilentlyContinue
+  $c1 = if ($null -ne $p1) { $p1.ExitCode } else { 0 }
+  if ($c1 -eq 0) { return 0 }
+
+  # Check if policy blocked
+  if ($c1 -eq $PolicyBlockedCode) {
+    Write-Warning ("Installation of '{0}' is blocked by Group Policy or Windows Defender Application Control." -f $App.AppName)
+    Write-Warning "This requires administrative policy changes or manual installation."
+    Write-Warning "Error code: 0x8A15000F (APPINSTALLER_CLI_ERROR_BLOCKED_BY_POLICY)"
+    if ($App.ContainsKey('ManualUrl')) {
+      Write-Host "Manual download available at: $($App.ManualUrl)" -ForegroundColor Cyan
+    }
+    return $c1
+  }
+
+  # Attempt 2: refresh sources and flip scope
+  try { Start-Process winget.exe -ArgumentList @("source","update","--disable-interactivity") -Wait -ErrorAction SilentlyContinue | Out-Null } catch {}
+  $alt = if ($App.ContainsKey('WingetScope') -and $App.WingetScope -eq 'Machine') { 'User' } else { 'Machine' }
+  $args2 = @($base) + @("--scope",$alt)
+  $p2 = Start-Process -FilePath "winget.exe" -ArgumentList $args2 -Wait -PassThru -ErrorAction SilentlyContinue
+  $c2 = if ($null -ne $p2) { $p2.ExitCode } else { 0 }
+  if ($c2 -eq 0) { return 0 }
+
+  # Check if policy blocked on second attempt
+  if ($c2 -eq $PolicyBlockedCode) {
+    Write-Warning ("Installation of '{0}' is blocked by Group Policy or Windows Defender Application Control." -f $App.AppName)
+    Write-Warning "This requires administrative policy changes or manual installation."
+    Write-Warning "Error code: 0x8A15000F (APPINSTALLER_CLI_ERROR_BLOCKED_BY_POLICY)"
+    if ($App.ContainsKey('ManualUrl')) {
+      Write-Host "Manual download available at: $($App.ManualUrl)" -ForegroundColor Cyan
+    }
+    return $c2
+  }
+
+  Write-Warning ("winget failed for {0}. Codes: first={1}, second={2}. Consider manual installer." -f $App.AppName,$c1,$c2)
+  return $c2
+}
+
+function Wait-UntilDetected {
+  param([Parameter(Mandatory)][hashtable]$App,[int]$TimeoutSec=150,[int]$IntervalSec=5)
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  do {
+    if (Test-AppInstalled -App $App) { return $true }
+    Start-Sleep -Seconds $IntervalSec
+  } while ((Get-Date) -lt $deadline)
+  return $false
+}
+
+function Get-PendingReboot {
+  $keys = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired',
+    'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'
+  )
+  foreach ($k in $keys) {
+    if (Test-Path $k) {
+      if ($k -like '*Session Manager*') {
+        try { if ((Get-ItemProperty $k -Name PendingFileRenameOperations -ErrorAction SilentlyContinue)) { return $true } } catch {}
+      } else { return $true }
+    }
+  }
+  return $false
+}
+
+# --- UPDATED: uses Install-WithWingetRetry for WINGET case ---
+function Invoke-GenericInstall {
+  [CmdletBinding()]
+  param([Parameter(Mandatory)][hashtable]$App)
+  $AppName = $App.AppName
+  $InstallerType = $App.Type
+  Write-Host "--- Starting installation for '$AppName' (Type: $InstallerType) ---" -ForegroundColor Cyan
+  $tmp = $null; $exit = $null
+
+  try {
+    switch ($InstallerType) {
+      "MSI" {
+        $installerFilePath = $null
+        if ($App.ContainsKey('InstallerPath') -and (Test-Path -Path $App.InstallerPath)) {
+          $installerFilePath = $App.InstallerPath
+          Write-Host "Using network/local installer at: $installerFilePath"
+        } else {
+          Write-Host "Local installer not found or specified. Attempting download..."
+          
+          # --- FIX START ---
+          # Explicitly initialize $urls as an array
+          $urls = @()
+          if ($App.ContainsKey('Urls')) {
+            $urls = @($App.Urls) # Ensure $App.Urls (even if single) is treated as an array
+          } elseif ($App.ContainsKey('Url')) {
+            $urls = @($App.Url) # Ensure $App.Url is treated as an array
+          }
+          # --- FIX END ---
+          
+          if ($urls.Count -eq 0) { throw "No URL(s) specified for MSI." }
+          $resolvedUrl = $null
+          foreach ($u in $urls) {
+            try {
+              if ($u -match '\.msi($|\?)|//aka\.ms/') { $resolvedUrl = $u } else { $resolvedUrl = Get-MsiUrlFromLanding -LandingUrl $u }
+              break
+            } catch { continue }
+          }
+          if (-not $resolvedUrl) { throw "Could not resolve a valid MSI URL from provided Urls." }
+          $InstallerFileName = if ($App.ContainsKey('OutFileName')) { $App.OutFileName } else { [IO.Path]::GetFileName(([Uri]$resolvedUrl).AbsolutePath) }
+          if ([string]::IsNullOrWhiteSpace($InstallerFileName)) { $InstallerFileName = "$($App.AppName.Replace(' ','-'))-installer.msi" }
+          $installerFilePath = Join-Path -Path $env:TEMP -ChildPath $InstallerFileName
+          Write-Host "Downloading '$AppName' MSI..."
+          Get-File -Url $resolvedUrl -Out $installerFilePath
+          $tmp = $installerFilePath
+        }
+        $msiArgs = "/i `"$installerFilePath`" /qn /norestart"
+        if ($App.ContainsKey('MsiParams') -and $App.MsiParams) { $msiArgs += " $($App.MsiParams)" }
+        $p = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru -ErrorAction Stop
+        $exit = $p.ExitCode
+      }
+      "EXE" {
+        $installerFilePath = $null
+        if ($App.ContainsKey('InstallerPath') -and (Test-Path -Path $App.InstallerPath)) {
+          $installerFilePath = $App.InstallerPath
+          Write-Host "Using network/local installer at: $installerFilePath"
+        }
+        elseif ($App.ContainsKey('Url')) {
+          Write-Host "Local installer not found or specified. Attempting download..."
+          $InstallerFileName = if ($App.ContainsKey('OutFileName')) { $App.OutFileName } else { [IO.Path]::GetFileName(([Uri]$App.Url).AbsolutePath) }
+          if ([string]::IsNullOrWhiteSpace($InstallerFileName) -or $InstallerFileName -eq "files") { $InstallerFileName = "$($App.AppName.Replace(' ','-'))-installer.exe" }
+          $installerFilePath = Join-Path -Path $env:TEMP -ChildPath $InstallerFileName
+          Write-Host "Downloading '$AppName' EXE..."
+          Get-File -Url $App.Url -Out $installerFilePath
+          $tmp = $installerFilePath
+        }
+        else { throw "No valid InstallerPath or Url found for '$($App.AppName)'." }
+        $args = if ($App.ContainsKey('SilentArgs')) { $App.SilentArgs } else { "/quiet /norestart" }
+        $p = Start-Process -FilePath $installerFilePath -ArgumentList $args -Wait -PassThru -ErrorAction Stop
+        $exit = $p.ExitCode
+      }
+      "WINGET" {
+        $exit = Install-WithWingetRetry -App $App
+      }
+      "BUILTIN" {
+        Write-Host "'$AppName' is built into Windows. Skipping install." -ForegroundColor Green
+        $exit = 0
+      }
+      Default { throw "Unknown installer Type: $InstallerType" }
+    }
+
+    if ($null -eq $exit) { Write-Warning "Installer returned no exit code; treating as soft success for '$AppName'."; $exit = 0 }
+    if ($SoftSuccessCodes -notcontains $exit) { throw "Installer returned non-success exit code: $exit" }
+  }
+  catch {
+    Write-Host "ERROR: '$AppName' installation encountered an error." -ForegroundColor Red
+    Write-Host "Details: $($_.Exception.Message)"
+    $finalExitCode = if ($null -ne $exit) { $exit } else { -1 }
+    $Summary.Add([pscustomobject]@{ AppName = $AppName; Type = $InstallerType; Exit = $finalExitCode; Present = $false; Time = Get-Date })
+    $global:ScriptExitCode = 1
+    return
+  }
+  finally { if ($tmp -and (Test-Path $tmp)) { Remove-Item -Path $tmp -Force -ErrorAction SilentlyContinue } }
+
+  $isUserCtx = (($App.ContainsKey('RegistryScope') -and $App.RegistryScope -eq 'User') -or (($App.ContainsKey('CheckMethod') -and $App.CheckMethod -eq 'Appx') -and ($App.ContainsKey('Source') -and $App.Source -eq 'msstore'))) -and ($App.WingetScope -ne 'Machine')
+
+  $present = $false
+  if ($isUserCtx) {
+    Write-Host "User-context install for '$AppName' was initiated. Verification deferred." -ForegroundColor Yellow
+    $present = $true
+  } else {
+    $present = Wait-UntilDetected -App $App -TimeoutSec 150 -IntervalSec 5
+    if ($present) { Write-Host "'$AppName' installed or already present." -ForegroundColor Green }
+    else { Write-Warning "'$AppName' not detected after timeout; check the log or retry." }
+  }
+
+  $Summary.Add([pscustomobject]@{ AppName = $AppName; Type = $InstallerType; Exit = $exit; Present = [bool]$present; Time = Get-Date })
+}
+
+# --- DEVICE TYPE DETERMINATION ---
+$IsDesktop = $false
+if ($DeviceType -eq 'Desktop') { $IsDesktop = $true }
+elseif ($DeviceType -eq 'Laptop') { $IsDesktop = $false }
+else {
+  try {
+    $chassis = (Get-CimInstance -ClassName Win32_SystemEnclosure -ErrorAction SilentlyContinue).ChassisTypes
+    if ($chassis -and ($chassis -contains 3 -or $chassis -contains 4 -or $chassis -contains 5 -or $chassis -contains 6 -or $chassis -contains 7 -or $chassis -contains 15 -or $chassis -contains 23 -or $chassis -contains 31)) { $IsDesktop = $true }
+  } catch {}
+  Write-Host "Auto-detected DeviceType: $(if($IsDesktop){'Desktop'}else{'Laptop'})" -ForegroundColor Yellow
+}
+
+# Compose final app list with conditional modules
+$RequiredApps = @()
+$RequiredApps += $BaseApps
+if (-not $IsDesktop) {
+  $RequiredApps += $AirMediaModule
+  Write-Host "Crestron AirMedia module included for Laptop." -ForegroundColor Yellow
+}
+
+# --- MAIN SCRIPT BODY ---
+
+# Validate all app configurations
+Write-Host "Validating app configurations..." -ForegroundColor Cyan
+$configValid = $true
+foreach ($app in $RequiredApps) { if (-not (Test-AppConfiguration -App $app)) { $configValid = $false } }
+if (-not $configValid) { Write-Error "Configuration validation failed. Fix errors above and re-run."; return }
+Write-Host "Configuration validation passed." -ForegroundColor Green
+Write-Stamp "Config validated"
+
+# Separate apps into prerequisite and standard lists (safe missing-key handling)
+$PrerequisiteApps = $RequiredApps | Where-Object { $_.ContainsKey('IsPrerequisite') -and $_.IsPrerequisite }
+$StandardApps     = $RequiredApps | Where-Object { -not ($_.ContainsKey('IsPrerequisite') -and $_.IsPrerequisite) }
+
+# --- GUIDED PREREQUISITE CHECK ---
+while ($true) {
+  Write-Host "--- Starting Security Prerequisite Check ---" -ForegroundColor Cyan
+  $MissingPrereqs = [System.collections.Generic.List[object]]::new()
+
+  foreach ($app in $PrerequisiteApps) {
+    if (-not (Test-AppInstalled -App $app)) { $MissingPrereqs.Add($app) }
+    else { Write-Host "- $($app.AppName): Found" -ForegroundColor Green }
+  }
+
+  if ($MissingPrereqs.Count -gt 0) {
+    Write-Warning "The following security prerequisites are missing:"
+    foreach ($app in $MissingPrereqs) {
+      Write-Host "- $($app.AppName)" -ForegroundColor Red
+      if ($app.ContainsKey('ManualInstallPath')) { Write-Host "  Installation path: $($app.ManualInstallPath)" }
+    }
+    Read-Host "After installing all missing applications, press Enter to re-check"
+  }
+  else {
+    Write-Host "All security prerequisites are met." -ForegroundColor Green
+    Write-Host "--------------------------------------------"
+    Write-Host
+    break
+  }
+}
+
+# --- STANDARD INSTALLATION ---
+if (-not (Assert-WingetVersion -Minimum $MinWingetVersion)) { Write-Stamp "winget too old"; return }
+Ensure-WingetSources
+
+Write-Host "Starting check for required applications..."
+$AppsToInstall = @()
+$AlreadyPresentApps = [System.Collections.Generic.List[string]]::new()
+foreach ($app in $StandardApps) {
+  if (Test-AppInstalled -App $app) {
+    Write-Host " - Found: $($app.AppName)" -ForegroundColor Green
+    $AlreadyPresentApps.Add($app.AppName)
+  } else {
+    Write-Host " - Missing: $($app.AppName)" -ForegroundColor Yellow
+    $AppsToInstall += $app
+  }
+}
+
+Write-Host
+if ($AppsToInstall.Count -gt 0) {
+  $AppsToInstall = $AppsToInstall | Sort-Object InstallOrder
+  Write-Host "--------------------------------------------------"
+  Write-Warning "Installing missing applications..."
+  foreach ($app in $AppsToInstall) { Invoke-GenericInstall -App $app }
+} else {
+  Write-Host "All required applications are already installed." -ForegroundColor Green
+}
+
+# --- FINAL SUMMARY ---
+Stop-Transcript
+$logContent = [System.Collections.Generic.List[string]]::new()
+$logContent.Add("========================================")
+$logContent.Add(" App Installation Log")
+$logContent.Add("========================================")
+$logContent.Add("Date: $(Get-Date)")
+$logContent.Add("Computer: $env:COMPUTERNAME")
+$logContent.Add("User: $env:USERNAME")
+$logContent.Add("Generated by: Keith â€” GPT-5 Thinking at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')")
+$logContent.Add("")
+
+# Wrap in arrays to avoid null .Count errors when no installs occurred
+$successes = @($Summary | Where-Object { $_.Present })
+$failures  = @($Summary | Where-Object { -not $_.Present })
+
+$logContent.Add("--- Successful Installations ($($successes.Count)) ---")
+if ($successes.Count -gt 0) { $successes | ForEach-Object { $logContent.Add("- $($_.AppName) (Exit Code: $($_.Exit))") } } else { $logContent.Add("None") }
+$logContent.Add("")
+
+$logContent.Add("--- Failed Installations ($($failures.Count)) ---")
+if ($failures.Count -gt 0) { $failures | ForEach-Object { $logContent.Add("- $($_.AppName) (Exit Code: $($_.Exit))") } } else { $logContent.Add("None") }
+$logContent.Add("")
+
+$logContent.Add("--- Already Installed ($($AlreadyPresentApps.Count)) ---")
+if ($AlreadyPresentApps.Count -gt 0) { $AlreadyPresentApps | ForEach-Object { $logContent.Add("- $_") } } else { $logContent.Add("None") }
+$logContent.Add("")
+$logContent.Add("========================================")
+$logContent.Add("End of Report")
+
+$logContent | Out-File -FilePath $SummaryLogPath -Encoding UTF8 -Force
+
+Write-Host "--------------------------------------------------"
+Write-Host "All operations complete." -ForegroundColor Cyan
+Write-Host "Summary log: $SummaryLogPath"
+Write-Host "Transcript:  $TranscriptLogPath"
+Write-Stamp "Summary emitted"
+
+# --- [ADDED PER REQUEST] Wait before final verification ---
+Write-Host
+Write-Host "Waiting 10 seconds for services to settle before final verification..." -ForegroundColor Yellow
+Start-Sleep -Seconds 10
+# --- [END ADDITION] ---
+
+# --- FINAL CONDITIONAL OUTPUT ---
+Write-Host
+Write-Host "--------------------------------------------------"
+
+$StillMissingApps = [System.Collections.Generic.List[string]]::new()
+foreach ($app in $AppsToInstall) {
+  if (-not (Test-AppInstalled -App $app)) {
+    $isUserContextApp = (($app.ContainsKey('RegistryScope') -and $app.RegistryScope -eq 'User') -or
+      (($app.ContainsKey('CheckMethod') -and $app.CheckMethod -eq 'Appx') -and ($app.ContainsKey('Source') -and $app.Source -eq 'msstore'))) -and
+      ($app.WingetScope -ne 'Machine')
+    if (-not $isUserContextApp) { $StillMissingApps.Add($app.AppName) }
+  }
+}
+
+if ($StillMissingApps.Count -eq 0) {
+  Write-Host "All required applications have been installed successfully!" -ForegroundColor Green
+} else {
+  Write-Host "Required applications that still need to be installed:" -ForegroundColor Red
+  $StillMissingApps | ForEach-Object { Write-Host "- $_" -ForegroundColor Red }
+  Write-Host "`nSee log for details: $TranscriptLogPath" -ForegroundColor Yellow
+}
+Write-Host "--------------------------------------------------"
+Write-Stamp "Run complete"
+
+# --- [NEW] RE-ENABLE CONTROLLED FOLDER ACCESS ---
+Write-Host "`n--------------------------------------------------"
+Write-Host "Attempting to restore 'Controlled Folder Access' to previous state..." -ForegroundColor Yellow
+Write-Stamp "Re-enabling Controlled Folder Access"
+$oldErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'Stop'
+    # Try to enable Controlled Folder Access
+    Set-MpPreference -EnableControlledFolderAccess Enabled
+    
+    # Verify the setting
+    $newPrefs = Get-MpPreference
+    if ($newPrefs.EnableControlledFolderAccess -eq 1) {
+        Write-Host "[SUCCESS] Controlled Folder Access has been re-enabled." -ForegroundColor Green
+        Write-Stamp "Controlled Folder Access enabled"
+    } else {
+        Write-Host "[INFO] Controlled Folder Access remains managed by policy." -ForegroundColor Cyan
+        Write-Stamp "Controlled Folder Access managed by policy"
+    }
+} catch {
+    if ($_.Exception.Message -match '0x800106ba') {
+        Write-Host "[INFO] Controlled Folder Access is managed by Group Policy or Intune." -ForegroundColor Cyan
+        Write-Stamp "Controlled Folder Access managed by GPO/Intune"
+    } else {
+        Write-Warning "Could not restore Controlled Folder Access: $($_.Exception.Message)"
+        Write-Stamp "Error restoring Controlled Folder Access: $($_.Exception.Message)"
+    }
+} finally {
+    $ErrorActionPreference = $oldErrorActionPreference
+}
+Write-Host "--------------------------------------------------`n"
+# --- [END NEW] ---
+
+# --- EXIT CODE POLICY ---
+$rebootMatches = @($Summary | Where-Object { $_.Exit -eq 3010 })
+
+if ($ScriptExitCode -ne 0) {
+    # Failure already occurred and set the exit code to 1
+} elseif ($rebootMatches.Count -gt 0) {
+    $ScriptExitCode = 3010 # Reboot needed
+}
