@@ -193,10 +193,28 @@ function Get-DefenderStatus {
         Retrieves and displays Windows Defender virus and threat protection status
     #>
     param()
-    
+
     Write-SectionHeader "Virus & threat protection" "🛡️"
 
-    $preferences = Get-MpPreference
+    # Get Windows Defender preferences with error handling
+    try {
+        $preferences = Get-MpPreference -ErrorAction Stop
+    } catch {
+        Write-Host "`n  ✗ " -NoNewline -ForegroundColor Red
+        Write-Host "Unable to retrieve Windows Defender settings" -ForegroundColor Yellow
+        Write-Host "    Error: $($_.Exception.Message)" -ForegroundColor Gray
+        Write-Host "`n    ⚠️  TROUBLESHOOTING:" -ForegroundColor Yellow
+        Write-Host "    • If you just ran another script in this PowerShell window, try opening a NEW PowerShell window" -ForegroundColor White
+        Write-Host "    • Ensure Windows Defender service is running: Get-Service WinDefend" -ForegroundColor White
+        Write-Host "    • Try running: Start-Service WinDefend" -ForegroundColor White
+
+        Add-SecurityCheck -Category "Virus & Threat Protection" -Name "Defender Module Status" -IsEnabled $false -Severity "Critical" `
+            -Remediation "Open a new PowerShell Administrator window and run this script again" `
+            -Details "Failed to load Windows Defender preferences: $($_.Exception.Message)"
+
+        return
+    }
+
     $realTimeOff = $preferences.DisableRealtimeMonitoring
     
     # Store real-time protection status globally for dependency checks
