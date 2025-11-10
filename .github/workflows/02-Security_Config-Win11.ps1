@@ -1426,7 +1426,7 @@ try {
     # Removed: Display scan time
     
     # Set the timestamp this script was last edited
-    $lastEditedTimestamp = "2025-11-03 17:56:00" 
+    $lastEditedTimestamp = "2025-11-10 14:30:00" 
     Write-Host "  Last Edited: $lastEditedTimestamp" -ForegroundColor Green
     Write-Host "  www.AIIT.support All rights reserved" -ForegroundColor Green
     Write-Host ("─" * 60) -ForegroundColor DarkGray
