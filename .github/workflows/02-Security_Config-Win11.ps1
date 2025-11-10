@@ -251,7 +251,7 @@ function Get-DefenderStatus {
 
     if ($avInfo.IsThirdParty) {
         # Third-party antivirus detected
-        Write-Host "`n  ℹ️  " -NoNewline -ForegroundColor Cyan
+        Write-Host "  ℹ️  " -NoNewline -ForegroundColor Cyan
         Write-Host "Managed by third-party software: " -NoNewline -ForegroundColor White
         Write-Host "$($avInfo.ProductName)" -ForegroundColor Green
         Write-Host "    Windows Defender checks skipped (third-party antivirus active)" -ForegroundColor Gray
@@ -267,7 +267,7 @@ function Get-DefenderStatus {
     }
 
     # Windows Defender is the primary AV - proceed with normal checks
-    Write-Host "`n  ℹ️  " -NoNewline -ForegroundColor Cyan
+    Write-Host "  ℹ️  " -NoNewline -ForegroundColor Cyan
     Write-Host "Using Windows Defender as primary antivirus" -ForegroundColor Gray
 
     # Get Windows Defender preferences with error handling
@@ -522,8 +522,7 @@ function Get-ReputationProtection {
         }
     }
 
-    # Removed extra space
-    Write-Host "`nReputation-based protection" -ForegroundColor Cyan
+    Write-Host "Reputation-based protection" -ForegroundColor Cyan
     # SmartScreen for Windows
     $checkApps = Get-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "SmartScreenEnabled" -DefaultValue "Warn"
     $enabled = $checkApps -ne 'Off'
@@ -636,8 +635,7 @@ function Get-CoreIsolationStatus {
         }
     }
 
-    # Removed extra space
-    Write-Host "`nCore isolation" -ForegroundColor Cyan
+    Write-Host "Core isolation" -ForegroundColor Cyan
     # Memory Integrity
     $memIntegrity = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" -Name "Enabled" -DefaultValue 0
     $enabled = $memIntegrity -eq 1
@@ -656,8 +654,7 @@ function Get-CoreIsolationStatus {
         -Remediation "Requires compatible CPU and Windows 11 22H2+" `
         -Details "Hardware-based kernel stack protection"
 
-    # Removed extra space
-    Write-Host "`nSecurity processor" -ForegroundColor Cyan
+    Write-Host "Security processor" -ForegroundColor Cyan
     # LSA Protection
     $lsaProtection = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -DefaultValue 0
     $enabled = $lsaProtection -ge 1
@@ -690,7 +687,7 @@ function Get-ScanInformation {
     Write-SectionHeader "Scan information" "🔍"
     # Check if third-party antivirus is managing protection
     if (!$script:RealTimeProtectionEnabled) {
-        Write-Host "`n  ℹ️  " -NoNewline -ForegroundColor Cyan
+        Write-Host "  ℹ️  " -NoNewline -ForegroundColor Cyan
         Write-Host "Managed by third-party software" -ForegroundColor White
         Write-Host "    Scan information not available (third-party antivirus active)" -ForegroundColor Gray
         return
