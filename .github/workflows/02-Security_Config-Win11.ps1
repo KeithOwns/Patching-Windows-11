@@ -513,11 +513,19 @@ function Get-ReputationProtection {
         Retrieves and displays app and browser control settings
     #>
     param()
-    
+
     Write-SectionHeader "App & browser control" "🌐"
 
-    $preferences = Get-MpPreference
-    
+    # Get MpPreference only if not using third-party AV
+    $preferences = $null
+    if ($script:RealTimeProtectionEnabled) {
+        try {
+            $preferences = Get-MpPreference -ErrorAction Stop
+        } catch {
+            # Defender not available
+        }
+    }
+
     # Removed extra space
     Write-Host "`nReputation-based protection" -ForegroundColor Cyan
     
@@ -542,12 +550,16 @@ function Get-ReputationProtection {
     # PUA Protection
     # Removed extra space
     Write-Host "`nPotentially unwanted app blocking" -ForegroundColor Cyan
-    
-    $enabled = $preferences.PUAProtection -eq 1
+
+    $enabled = $false
+    if ($preferences) {
+        $enabled = $preferences.PUAProtection -eq 1
+    }
     Write-StatusIcon $enabled -Severity "Warning"
     Write-Host "Block potentially unwanted apps" -ForegroundColor White
+    $remediation = if ($script:RealTimeProtectionEnabled) { "Set-MpPreference -PUAProtection Enabled" } else { "N/A - Managed by third-party antivirus" }
     Add-SecurityCheck -Category "App & Browser Control" -Name "Block potentially unwanted apps" -IsEnabled $enabled -Severity "Warning" `
-        -Remediation "Set-MpPreference -PUAProtection Enabled" `
+        -Remediation $remediation `
         -Details "Blocks potentially unwanted applications"
     
     $blockDownloads = Get-EdgePUABlockDownloadsEnabled
@@ -569,28 +581,31 @@ function Get-ReputationProtection {
     # Exploit Protection (Network Protection) - REQUIRES Real-time Protection
     # Removed extra space
     Write-Host "`nExploit protection" -ForegroundColor Cyan
-    
-    try {
-        $networkProtection = Get-MpPreference | Select-Object -ExpandProperty EnableNetworkProtection
-        $npEnabled = $networkProtection -eq 1
-        
-        if (!$script:RealTimeProtectionEnabled) {
-            Write-StatusIcon $false -Severity "Warning"
-            Write-Host "Network protection " -NoNewline -ForegroundColor White
-            Write-Host "(inactive - requires Real-time protection)" -ForegroundColor DarkGray
-            Add-SecurityCheck -Category "App & Browser Control" -Name "Exploit protection (Network protection)" -IsEnabled $false -Severity "Warning" `
-                -Remediation "First enable Real-time protection, then: Set-MpPreference -EnableNetworkProtection Enabled" `
-                -Details "Blocks connections to malicious websites and domains. REQUIRES Real-time protection, behavior monitoring, and cloud protection"
-        } else {
+
+    if (!$script:RealTimeProtectionEnabled) {
+        # Real-time protection is off (third-party AV or disabled)
+        Write-StatusIcon $false -Severity "Warning"
+        Write-Host "Network protection " -NoNewline -ForegroundColor White
+        Write-Host "(inactive - requires Real-time protection)" -ForegroundColor DarkGray
+        $remediation = if ($preferences) { "First enable Real-time protection, then: Set-MpPreference -EnableNetworkProtection Enabled" } else { "N/A - Managed by third-party antivirus" }
+        Add-SecurityCheck -Category "App & Browser Control" -Name "Exploit protection (Network protection)" -IsEnabled $false -Severity "Warning" `
+            -Remediation $remediation `
+            -Details "Blocks connections to malicious websites and domains. REQUIRES Real-time protection, behavior monitoring, and cloud protection"
+    } else {
+        # Real-time protection is on, check Network Protection status
+        try {
+            $networkProtection = Get-MpPreference | Select-Object -ExpandProperty EnableNetworkProtection
+            $npEnabled = $networkProtection -eq 1
+
             Write-StatusIcon $npEnabled -Severity "Warning"
             Write-Host "Network protection" -ForegroundColor White
             Add-SecurityCheck -Category "App & Browser Control" -Name "Exploit protection (Network protection)" -IsEnabled $npEnabled -Severity "Warning" `
                 -Remediation "Set-MpPreference -EnableNetworkProtection Enabled" `
                 -Details "Blocks connections to malicious websites and domains. Requires Real-time protection"
+        } catch {
+            Write-Host " ? " -NoNewline -ForegroundColor Yellow
+            Write-Host "Network protection (Unable to determine)" -ForegroundColor Gray
         }
-    } catch {
-        Write-Host " ? " -NoNewline -ForegroundColor Yellow
-        Write-Host "Network protection (Unable to determine)" -ForegroundColor Gray
     }
 }
 
@@ -650,8 +665,16 @@ function Get-CoreIsolationStatus {
     
     Write-SectionHeader "Device security" "🔒"
 
-    $preferences = Get-MpPreference
-    
+    # Get MpPreference only if not using third-party AV
+    $preferences = $null
+    if ($script:RealTimeProtectionEnabled) {
+        try {
+            $preferences = Get-MpPreference -ErrorAction Stop
+        } catch {
+            # Defender not available
+        }
+    }
+
     # Removed extra space
     Write-Host "`nCore isolation" -ForegroundColor Cyan
     
@@ -686,11 +709,15 @@ function Get-CoreIsolationStatus {
         -Details "Protects LSA process from credential theft"
 
     # Vulnerable Driver Blocklist
-    $enabled = !$preferences.DisableVulnerableDriverBlocklist
+    $enabled = $false
+    if ($preferences) {
+        $enabled = !$preferences.DisableVulnerableDriverBlocklist
+    }
     Write-StatusIcon $enabled -Severity "Warning"
     Write-Host "Microsoft Vulnerable Driver Blocklist" -ForegroundColor White
+    $remediation = if ($script:RealTimeProtectionEnabled) { "Set-MpPreference -DisableVulnerableDriverBlocklist `$false" } else { "N/A - Managed by third-party antivirus" }
     Add-SecurityCheck -Category "Device Security" -Name "Microsoft Vulnerable Driver Blocklist" -IsEnabled $enabled -Severity "Warning" `
-        -Remediation "Set-MpPreference -DisableVulnerableDriverBlocklist `$false" `
+        -Remediation $remediation `
         -Details "Blocks known vulnerable drivers from loading"
 }
 
