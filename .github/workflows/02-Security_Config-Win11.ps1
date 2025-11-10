@@ -246,7 +246,6 @@ function Get-DefenderStatus {
     param()
 
     Write-SectionHeader "Virus & threat protection" "🛡️"
-
     # Check for third-party antivirus software
     $avInfo = Get-ThirdPartyAntivirus
 
@@ -392,7 +391,6 @@ function Get-AccountProtection {
     param()
     
     Write-SectionHeader "Account protection" "👤"
-
     # Windows Hello
     $helloConfigured = $false
     try {
@@ -446,7 +444,6 @@ function Get-FirewallStatus {
     param()
     
     Write-SectionHeader "Firewall & network protection" "🔥"
-
     # Build a dictionary of active networks to display next to their profile status
     $activeNetworks = @{}
     try {
@@ -515,7 +512,6 @@ function Get-ReputationProtection {
     param()
 
     Write-SectionHeader "App & browser control" "🌐"
-
     # Get MpPreference only if not using third-party AV
     $preferences = $null
     if ($script:RealTimeProtectionEnabled) {
@@ -528,7 +524,6 @@ function Get-ReputationProtection {
 
     # Removed extra space
     Write-Host "`nReputation-based protection" -ForegroundColor Cyan
-    
     # SmartScreen for Windows
     $checkApps = Get-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "SmartScreenEnabled" -DefaultValue "Warn"
     $enabled = $checkApps -ne 'Off'
@@ -631,7 +626,6 @@ function Get-CoreIsolationStatus {
     param()
     
     Write-SectionHeader "Device security" "🔒"
-
     # Get MpPreference only if not using third-party AV
     $preferences = $null
     if ($script:RealTimeProtectionEnabled) {
@@ -644,7 +638,6 @@ function Get-CoreIsolationStatus {
 
     # Removed extra space
     Write-Host "`nCore isolation" -ForegroundColor Cyan
-    
     # Memory Integrity
     $memIntegrity = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" -Name "Enabled" -DefaultValue 0
     $enabled = $memIntegrity -eq 1
@@ -665,7 +658,6 @@ function Get-CoreIsolationStatus {
 
     # Removed extra space
     Write-Host "`nSecurity processor" -ForegroundColor Cyan
-    
     # LSA Protection
     $lsaProtection = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -DefaultValue 0
     $enabled = $lsaProtection -ge 1
@@ -696,7 +688,6 @@ function Get-ScanInformation {
     param()
     
     Write-SectionHeader "Scan information" "🔍"
-    
     $status = Get-MpComputerStatus
     $now = Get-Date
 
