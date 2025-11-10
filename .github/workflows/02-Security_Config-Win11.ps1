@@ -699,16 +699,43 @@ function Get-CoreIsolationStatus {
         -Details "Protects LSA process from credential theft"
 
     # Vulnerable Driver Blocklist
+    # Check the registry directly (more reliable than Get-MpPreference)
+    $vdbRegPath = "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config"
+    $vdbRegValueName = "VulnerableDriverBlocklistEnable"
     $enabled = $false
-    if ($preferences) {
-        $enabled = $preferences.DisableVulnerableDriverBlocklist -eq $false
+    $vdbDetails = ""
+
+    try {
+        $vdbValue = Get-ItemProperty -Path $vdbRegPath -Name $vdbRegValueName -ErrorAction Stop
+
+        if ($vdbValue.VulnerableDriverBlocklistEnable -eq 1) {
+            $enabled = $true
+            $vdbDetails = "Blocks known vulnerable drivers from loading"
+        } elseif ($vdbValue.VulnerableDriverBlocklistEnable -eq 0) {
+            $enabled = $false
+            $vdbDetails = "Blocks known vulnerable drivers from loading (Currently disabled)"
+        } else {
+            $enabled = $false
+            $vdbDetails = "Blocks known vulnerable drivers from loading (Unknown value: $($vdbValue.VulnerableDriverBlocklistEnable))"
+        }
     }
+    catch [Microsoft.PowerShell.Commands.ItemPropertyNotFoundException] {
+        # Value doesn't exist - on modern systems (Win11 22H2+), this means enabled by default
+        $enabled = $true
+        $vdbDetails = "Blocks known vulnerable drivers from loading (Enabled by default)"
+    }
+    catch {
+        # Other errors (path not found, permissions, etc.)
+        $enabled = $false
+        $vdbDetails = "Blocks known vulnerable drivers from loading (Error reading registry)"
+    }
+
     Write-StatusIcon $enabled -Severity "Warning"
     Write-Host "Microsoft Vulnerable Driver Blocklist" -ForegroundColor White
-    $remediation = if ($script:RealTimeProtectionEnabled) { "Set-MpPreference -DisableVulnerableDriverBlocklist `$false" } else { "N/A - Managed by third-party antivirus" }
+    $remediation = "Set-ItemProperty -Path '$vdbRegPath' -Name '$vdbRegValueName' -Value 1"
     Add-SecurityCheck -Category "Device Security" -Name "Microsoft Vulnerable Driver Blocklist" -IsEnabled $enabled -Severity "Warning" `
         -Remediation $remediation `
-        -Details "Blocks known vulnerable drivers from loading"
+        -Details $vdbDetails
 }
 
 function Get-ScanInformation {
@@ -1460,7 +1487,7 @@ try {
     # Removed: Display scan time
     
     # Set the timestamp this script was last edited
-    $lastEditedTimestamp = "2025-11-10 22:30:00" 
+    $lastEditedTimestamp = "2025-11-10 22:35:00" 
     Write-Host "  Last Edited: $lastEditedTimestamp" -ForegroundColor Green
     Write-Host "  www.AIIT.support All rights reserved" -ForegroundColor Green
     Write-Host ("─" * 60) -ForegroundColor DarkGray
