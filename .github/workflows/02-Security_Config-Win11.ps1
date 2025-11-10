@@ -688,6 +688,14 @@ function Get-ScanInformation {
     param()
     
     Write-SectionHeader "Scan information" "🔍"
+    # Check if third-party antivirus is managing protection
+    if (!$script:RealTimeProtectionEnabled) {
+        Write-Host "`n  ℹ️  " -NoNewline -ForegroundColor Cyan
+        Write-Host "Managed by third-party software" -ForegroundColor White
+        Write-Host "    Scan information not available (third-party antivirus active)" -ForegroundColor Gray
+        return
+    }
+
     $status = Get-MpComputerStatus
     $now = Get-Date
 
