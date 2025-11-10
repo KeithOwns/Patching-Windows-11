@@ -577,35 +577,77 @@ function Get-ReputationProtection {
     Add-SecurityCheck -Category "App & Browser Control" -Name "SmartScreen for Microsoft Store apps" -IsEnabled $enabled -Severity "Info" `
         -Remediation "Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\AppHost' -Name 'EnableWebContentEvaluation' -Value 1" `
         -Details "SmartScreen for apps from Microsoft Store"
-    
-    # Exploit Protection (Network Protection) - REQUIRES Real-time Protection
+
+    # Exploit Protection - Check system-wide settings
     # Removed extra space
     Write-Host "`nExploit protection" -ForegroundColor Cyan
 
-    if (!$script:RealTimeProtectionEnabled) {
-        # Real-time protection is off (third-party AV or disabled)
-        Write-StatusIcon $false -Severity "Warning"
-        Write-Host "Network protection " -NoNewline -ForegroundColor White
-        Write-Host "(inactive - requires Real-time protection)" -ForegroundColor DarkGray
-        $remediation = if ($preferences) { "First enable Real-time protection, then: Set-MpPreference -EnableNetworkProtection Enabled" } else { "N/A - Managed by third-party antivirus" }
-        Add-SecurityCheck -Category "App & Browser Control" -Name "Exploit protection (Network protection)" -IsEnabled $false -Severity "Warning" `
-            -Remediation $remediation `
-            -Details "Blocks connections to malicious websites and domains. REQUIRES Real-time protection, behavior monitoring, and cloud protection"
-    } else {
-        # Real-time protection is on, check Network Protection status
-        try {
-            $networkProtection = Get-MpPreference | Select-Object -ExpandProperty EnableNetworkProtection
-            $npEnabled = $networkProtection -eq 1
+    try {
+        # Get system-wide exploit protection settings
+        $mitigations = Get-ProcessMitigation -System -ErrorAction Stop
 
-            Write-StatusIcon $npEnabled -Severity "Warning"
-            Write-Host "Network protection" -ForegroundColor White
-            Add-SecurityCheck -Category "App & Browser Control" -Name "Exploit protection (Network protection)" -IsEnabled $npEnabled -Severity "Warning" `
-                -Remediation "Set-MpPreference -EnableNetworkProtection Enabled" `
-                -Details "Blocks connections to malicious websites and domains. Requires Real-time protection"
-        } catch {
-            Write-Host " ? " -NoNewline -ForegroundColor Yellow
-            Write-Host "Network protection (Unable to determine)" -ForegroundColor Gray
+        # Track disabled settings
+        $disabledSettings = @()
+
+        # Check key exploit protection settings
+        # DEP (Data Execution Prevention)
+        if ($mitigations.DEP.Enable -eq 'OFF' -or $mitigations.DEP.Enable -eq 'NOTSET') {
+            $disabledSettings += "Data Execution Prevention (DEP)"
         }
+
+        # Control Flow Guard (CFG)
+        if ($mitigations.CFG.Enable -eq 'OFF' -or $mitigations.CFG.Enable -eq 'NOTSET') {
+            $disabledSettings += "Control Flow Guard (CFG)"
+        }
+
+        # Force randomization for images (Mandatory ASLR)
+        if ($mitigations.ImageLoad.RequireImage -eq 'OFF' -or $mitigations.ImageLoad.RequireImage -eq 'NOTSET') {
+            $disabledSettings += "Force randomization for images (Mandatory ASLR)"
+        }
+
+        # Randomize memory allocations (Bottom-up ASLR)
+        if ($mitigations.ASLR.BottomUp -eq 'OFF' -or $mitigations.ASLR.BottomUp -eq 'NOTSET') {
+            $disabledSettings += "Randomize memory allocations (Bottom-up ASLR)"
+        }
+
+        # High-entropy ASLR
+        if ($mitigations.ASLR.HighEntropy -eq 'OFF' -or $mitigations.ASLR.HighEntropy -eq 'NOTSET') {
+            $disabledSettings += "High-entropy ASLR"
+        }
+
+        # Validate exception chains (SEHOP)
+        if ($mitigations.SEHOP.Enable -eq 'OFF' -or $mitigations.SEHOP.Enable -eq 'NOTSET') {
+            $disabledSettings += "Validate exception chains (SEHOP)"
+        }
+
+        # Validate heap integrity
+        if ($mitigations.Heap.TerminateOnError -eq 'OFF' -or $mitigations.Heap.TerminateOnError -eq 'NOTSET') {
+            $disabledSettings += "Validate heap integrity"
+        }
+
+        # Determine if exploit protection is properly configured
+        $allEnabled = $disabledSettings.Count -eq 0
+
+        Write-StatusIcon $allEnabled -Severity "Warning"
+        if ($allEnabled) {
+            Write-Host "System settings (all protections enabled)" -ForegroundColor White
+            Add-SecurityCheck -Category "App & Browser Control" -Name "Exploit protection" -IsEnabled $true -Severity "Warning" `
+                -Remediation "N/A - All system-wide exploit protections are enabled" `
+                -Details "System-wide exploit protection settings are properly configured"
+        } else {
+            Write-Host "System settings " -NoNewline -ForegroundColor White
+            Write-Host "(some protections disabled)" -ForegroundColor Yellow
+            Write-Host "    Disabled: $($disabledSettings -join ', ')" -ForegroundColor Gray
+            Add-SecurityCheck -Category "App & Browser Control" -Name "Exploit protection" -IsEnabled $false -Severity "Warning" `
+                -Remediation "Enable via Windows Security > App & browser control > Exploit protection settings > System settings" `
+                -Details "The following protections are disabled: $($disabledSettings -join ', ')"
+        }
+    } catch {
+        Write-Host " ? " -NoNewline -ForegroundColor Yellow
+        Write-Host "Exploit protection (Unable to determine)" -ForegroundColor Gray
+        Add-SecurityCheck -Category "App & Browser Control" -Name "Exploit protection" -IsEnabled $false -Severity "Warning" `
+            -Remediation "Check Windows Security > App & browser control > Exploit protection settings" `
+            -Details "Unable to query exploit protection settings: $($_.Exception.Message)"
     }
 }
 
