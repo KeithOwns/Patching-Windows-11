@@ -548,9 +548,6 @@ function Get-ReputationProtection {
         -Details "SmartScreen protection in Microsoft Edge browser"
 
     # PUA Protection
-    # Removed extra space
-    Write-Host "`nPotentially unwanted app blocking" -ForegroundColor Cyan
-
     $enabled = $false
     if ($preferences) {
         $enabled = $preferences.PUAProtection -eq 1
