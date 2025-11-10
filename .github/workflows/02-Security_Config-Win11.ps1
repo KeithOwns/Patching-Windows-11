@@ -408,20 +408,67 @@ function Get-AccountProtection {
         -Remediation "Configure via Settings > Accounts > Sign-in options" `
         -Details "Biometric authentication for secure sign-in"
 
-    # Dynamic Lock
+    # Dynamic Lock - Enhanced check for active phone connection
     $dynamicLockEnabled = $false
+    $dynamicLockActive = $false
+    $phoneConnected = ""
+
     try {
+        # First check if Dynamic Lock setting is enabled
         $dynamicLock = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "EnableGoodbye" -ErrorAction Stop
-        if ($dynamicLock -eq 1) { 
-            $dynamicLockEnabled = $true 
+
+        if ($dynamicLock -eq 1) {
+            $dynamicLockEnabled = $true
+
+            # Check for connected Bluetooth devices that could be used for Dynamic Lock
+            try {
+                # Query Bluetooth devices
+                Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction SilentlyContinue
+
+                # Use Get-PnpDevice to check for connected Bluetooth devices
+                $bluetoothDevices = Get-PnpDevice -Class Bluetooth -ErrorAction Stop | Where-Object {
+                    $_.Status -eq 'OK' -and
+                    $_.FriendlyName -notmatch 'Radio|Adapter|Controller|Enumerator'
+                }
+
+                if ($bluetoothDevices) {
+                    # At least one Bluetooth device is connected
+                    $connectedDevices = @($bluetoothDevices | Where-Object { $_.Status -eq 'OK' })
+                    if ($connectedDevices.Count -gt 0) {
+                        $dynamicLockActive = $true
+                        $phoneConnected = $connectedDevices[0].FriendlyName
+                        if ($connectedDevices.Count -gt 1) {
+                            $phoneConnected += " (and $($connectedDevices.Count - 1) other device(s))"
+                        }
+                    }
+                }
+            } catch {
+                # If we can't check Bluetooth devices, fall back to just checking if enabled
+                # This happens if Bluetooth isn't available or Get-PnpDevice fails
+            }
         }
     } catch { }
-    
-    Write-StatusIcon $dynamicLockEnabled -Severity "Info"
-    Write-Host "Dynamic lock" -ForegroundColor White
-    Add-SecurityCheck -Category "Account Protection" -Name "Dynamic lock" -IsEnabled $dynamicLockEnabled -Severity "Info" `
-        -Remediation "Configure via Settings > Accounts > Sign-in options > Dynamic lock" `
-        -Details "Automatically locks PC when paired Bluetooth device is out of range"
+
+    # Show status based on whether a phone is actually connected
+    Write-StatusIcon $dynamicLockActive -Severity "Info"
+    Write-Host "Dynamic lock" -NoNewline -ForegroundColor White
+
+    if ($dynamicLockEnabled -and $dynamicLockActive) {
+        Write-Host " (phone connected: $phoneConnected)" -ForegroundColor Green
+        Add-SecurityCheck -Category "Account Protection" -Name "Dynamic lock" -IsEnabled $true -Severity "Info" `
+            -Remediation "N/A - Dynamic lock is active with connected device" `
+            -Details "Automatically locks PC when paired Bluetooth device ($phoneConnected) is out of range"
+    } elseif ($dynamicLockEnabled -and !$dynamicLockActive) {
+        Write-Host " (configured but no phone connected)" -ForegroundColor Yellow
+        Add-SecurityCheck -Category "Account Protection" -Name "Dynamic lock" -IsEnabled $false -Severity "Info" `
+            -Remediation "Connect your paired Bluetooth phone to activate Dynamic lock" `
+            -Details "Dynamic lock is configured but no Bluetooth device is currently connected"
+    } else {
+        Write-Host ""
+        Add-SecurityCheck -Category "Account Protection" -Name "Dynamic lock" -IsEnabled $false -Severity "Info" `
+            -Remediation "Configure via Settings > Accounts > Sign-in options > Dynamic lock" `
+            -Details "Automatically locks PC when paired Bluetooth device is out of range"
+    }
 
     # Facial Recognition
     $userSID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
