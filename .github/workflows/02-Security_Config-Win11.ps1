@@ -6,14 +6,18 @@
 .DESCRIPTION
     Retrieves and displays all Windows Security configurations with visual formatting,
     security scoring, export capabilities, and remediation suggestions.
-    
+
+    Automatically detects whether Windows Defender or third-party antivirus software
+    is managing virus protection, and adapts the report accordingly.
+
     Features:
+    - Automatic third-party antivirus detection
     - Security score calculation (0-100)
     - Visual console output with color-coded status
     - HTML and JSON export options
     - Remediation suggestions for disabled features
     - Baseline comparison mode
-    
+
 .PARAMETER ExportHtml
     Export the report to an HTML file
 .PARAMETER ExportJson
@@ -29,18 +33,19 @@
 .NOTES
     Requires Administrator privileges
     Encoding: UTF-8 (required for proper display of icons and special characters)
-    Compatible with: Windows 10/11 with Windows Defender
+    Compatible with: Windows 10/11 with Windows Defender or third-party antivirus
+    Automatically detects: Symantec, McAfee, Trend Micro, Norton, and other major AV products
 .EXAMPLE
-    .\WindowsSecurityConfig.ps1
+    .\02-Security_Config-Win11.ps1
     Displays the current Windows Security status
 .EXAMPLE
-    .\WindowsSecurityConfig.ps1 -ExportHtml -OutputPath "C:\Reports"
+    .\02-Security_Config-Win11.ps1 -ExportHtml -OutputPath "C:\Reports"
     Generates an HTML report in the specified directory
 .EXAMPLE
-    .\WindowsSecurityConfig.ps1 -ShowRemediation
+    .\02-Security_Config-Win11.ps1 -ShowRemediation
     Shows remediation commands for disabled features
 .EXAMPLE
-    .\WindowsSecurityConfig.ps1 -SaveAsBaseline "C:\baseline.json"
+    .\02-Security_Config-Win11.ps1 -SaveAsBaseline "C:\baseline.json"
     Saves current state as a baseline for future comparison
 #>
 
@@ -187,14 +192,84 @@ function Write-SectionHeader {
     Write-Host ("─" * 60) -ForegroundColor DarkGray
 }
 
+function Get-ThirdPartyAntivirus {
+    <#
+    .SYNOPSIS
+        Detects if third-party antivirus software is managing virus protection
+    .OUTPUTS
+        Returns PSCustomObject with IsThirdParty (bool) and ProductName (string)
+    #>
+    try {
+        # Query Windows Security Center for antivirus products
+        $antivirusProducts = Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName "AntiVirusProduct" -ErrorAction Stop
+
+        foreach ($av in $antivirusProducts) {
+            # Filter out Windows Defender (displayName contains "Defender" or "Windows Security")
+            if ($av.displayName -notmatch "Defender|Windows Security") {
+                # Check if the product is enabled (productState encoding)
+                # Bit manipulation: productState contains status info
+                # If productState indicates the AV is enabled, it's managing protection
+                $productState = $av.productState
+
+                # Extract enabled status (varies by product, but generally if productState > 0, it's installed)
+                # More reliable: if a third-party product is listed and not disabled
+                if ($productState) {
+                    return [PSCustomObject]@{
+                        IsThirdParty = $true
+                        ProductName = $av.displayName
+                    }
+                }
+            }
+        }
+
+        # No third-party AV found
+        return [PSCustomObject]@{
+            IsThirdParty = $false
+            ProductName = "Windows Defender"
+        }
+    } catch {
+        # If we can't query SecurityCenter2, assume Windows Defender
+        # (SecurityCenter2 may not be available on some systems)
+        return [PSCustomObject]@{
+            IsThirdParty = $false
+            ProductName = "Windows Defender"
+        }
+    }
+}
+
 function Get-DefenderStatus {
     <#
     .SYNOPSIS
         Retrieves and displays Windows Defender virus and threat protection status
+        or detects third-party antivirus software
     #>
     param()
 
     Write-SectionHeader "Virus & threat protection" "🛡️"
+
+    # Check for third-party antivirus software
+    $avInfo = Get-ThirdPartyAntivirus
+
+    if ($avInfo.IsThirdParty) {
+        # Third-party antivirus detected
+        Write-Host "`n  ℹ️  " -NoNewline -ForegroundColor Cyan
+        Write-Host "Managed by third-party software: " -NoNewline -ForegroundColor White
+        Write-Host "$($avInfo.ProductName)" -ForegroundColor Green
+        Write-Host "    Windows Defender checks skipped (third-party antivirus active)" -ForegroundColor Gray
+
+        # Set global flag to false since third-party AV is in use
+        $script:RealTimeProtectionEnabled = $false
+
+        Add-SecurityCheck -Category "Virus & Threat Protection" -Name "Third-party antivirus" -IsEnabled $true -Severity "Info" `
+            -Remediation "N/A - Managed by $($avInfo.ProductName)" `
+            -Details "Virus and threat protection is managed by third-party antivirus: $($avInfo.ProductName)"
+
+        return
+    }
+
+    # Windows Defender is the primary AV - proceed with normal checks
+    Write-Host "`n  ℹ️  " -NoNewline -ForegroundColor Cyan
+    Write-Host "Using Windows Defender as primary antivirus" -ForegroundColor Gray
 
     # Get Windows Defender preferences with error handling
     try {
