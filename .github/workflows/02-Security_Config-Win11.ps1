@@ -670,7 +670,7 @@ function Get-CoreIsolationStatus {
     # Vulnerable Driver Blocklist
     $enabled = $false
     if ($preferences) {
-        $enabled = !$preferences.DisableVulnerableDriverBlocklist
+        $enabled = $preferences.DisableVulnerableDriverBlocklist -eq $false
     }
     Write-StatusIcon $enabled -Severity "Warning"
     Write-Host "Microsoft Vulnerable Driver Blocklist" -ForegroundColor White
