@@ -204,12 +204,12 @@ function Get-DefenderStatus {
         Write-Host "Unable to retrieve Windows Defender settings" -ForegroundColor Yellow
         Write-Host "    Error: $($_.Exception.Message)" -ForegroundColor Gray
         Write-Host "`n    ⚠️  TROUBLESHOOTING:" -ForegroundColor Yellow
-        Write-Host "    • If you just ran another script in this PowerShell window, try opening a NEW PowerShell window" -ForegroundColor White
         Write-Host "    • Ensure Windows Defender service is running: Get-Service WinDefend" -ForegroundColor White
         Write-Host "    • Try running: Start-Service WinDefend" -ForegroundColor White
+        Write-Host "    • If issue persists, restart PowerShell and run this script alone" -ForegroundColor White
 
         Add-SecurityCheck -Category "Virus & Threat Protection" -Name "Defender Module Status" -IsEnabled $false -Severity "Critical" `
-            -Remediation "Open a new PowerShell Administrator window and run this script again" `
+            -Remediation "Ensure Windows Defender service is running, then rerun this script" `
             -Details "Failed to load Windows Defender preferences: $($_.Exception.Message)"
 
         return
