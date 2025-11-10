@@ -409,19 +409,45 @@ function Get-AccountProtection {
         -Details "Biometric authentication for secure sign-in"
 
     # Dynamic Lock
-    $dynamicLockEnabled = $false
+    # First check if Bluetooth is enabled
+    $bluetoothEnabled = $false
     try {
-        $dynamicLock = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "EnableGoodbye" -ErrorAction Stop
-        if ($dynamicLock -eq 1) { 
-            $dynamicLockEnabled = $true 
+        # Check for Bluetooth radio device status
+        $bluetoothRadio = Get-PnpDevice -Class Bluetooth -ErrorAction Stop | Where-Object {
+            $_.FriendlyName -match 'Radio|Adapter' -and $_.Status -eq 'OK'
         }
-    } catch { }
-    
-    Write-StatusIcon $dynamicLockEnabled -Severity "Info"
-    Write-Host "Dynamic lock" -ForegroundColor White
-    Add-SecurityCheck -Category "Account Protection" -Name "Dynamic lock" -IsEnabled $dynamicLockEnabled -Severity "Info" `
-        -Remediation "Configure via Settings > Accounts > Sign-in options > Dynamic lock" `
-        -Details "Automatically locks PC when paired Bluetooth device is out of range"
+        if ($bluetoothRadio) {
+            $bluetoothEnabled = $true
+        }
+    } catch {
+        # If we can't query Bluetooth devices, assume it's not available
+        $bluetoothEnabled = $false
+    }
+
+    if (-not $bluetoothEnabled) {
+        # Bluetooth is disabled or not available
+        Write-StatusIcon $false -Severity "Info"
+        Write-Host "Dynamic lock " -NoNewline -ForegroundColor White
+        Write-Host "(Turn Bluetooth on to enable dynamic lock)" -ForegroundColor Yellow
+        Add-SecurityCheck -Category "Account Protection" -Name "Dynamic lock" -IsEnabled $false -Severity "Info" `
+            -Remediation "Enable Bluetooth in Settings > Bluetooth & devices, then configure Dynamic lock" `
+            -Details "Dynamic lock requires Bluetooth to be enabled"
+    } else {
+        # Bluetooth is enabled, check Dynamic Lock setting
+        $dynamicLockEnabled = $false
+        try {
+            $dynamicLock = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "EnableGoodbye" -ErrorAction Stop
+            if ($dynamicLock -eq 1) {
+                $dynamicLockEnabled = $true
+            }
+        } catch { }
+
+        Write-StatusIcon $dynamicLockEnabled -Severity "Info"
+        Write-Host "Dynamic lock" -ForegroundColor White
+        Add-SecurityCheck -Category "Account Protection" -Name "Dynamic lock" -IsEnabled $dynamicLockEnabled -Severity "Info" `
+            -Remediation "Configure via Settings > Accounts > Sign-in options > Dynamic lock" `
+            -Details "Automatically locks PC when paired Bluetooth device is out of range"
+    }
 
     # Facial Recognition
     $userSID = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
