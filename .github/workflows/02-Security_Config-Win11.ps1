@@ -523,14 +523,48 @@ function Get-ReputationProtection {
     }
 
     Write-Host "Reputation-based protection" -ForegroundColor Cyan
-    # SmartScreen for Windows
-    $checkApps = Get-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "SmartScreenEnabled" -DefaultValue "Warn"
-    $enabled = $checkApps -ne 'Off'
+    # SmartScreen for Windows - Check apps and files
+    # This checks both Group Policy (which overrides user settings) and local settings
+    $gpoPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\SmartScreen"
+    $gpoValueName = "EnableSmartScreen"
+    $userPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer"
+    $userValueName = "SmartScreenEnabled"
+
+    $enabled = $false
+    $controlMethod = "Unknown"
+
+    # Check for Group Policy setting first (overrides user setting)
+    $gpoSetting = Get-ItemProperty -Path $gpoPath -Name $gpoValueName -ErrorAction SilentlyContinue
+
+    if ($null -ne $gpoSetting) {
+        $controlMethod = "Group Policy"
+        $enabled = ($gpoSetting.$gpoValueName -eq 1)
+    } else {
+        # No GPO, check local user setting
+        $userSetting = Get-ItemProperty -Path $userPath -Name $userValueName -ErrorAction SilentlyContinue
+
+        if ($null -ne $userSetting) {
+            $controlMethod = "Local Setting"
+            $value = $userSetting.$userValueName.ToLower()
+            # 'Warn' or 'Block' both mean the feature is enabled
+            $enabled = ($value -eq "warn" -or $value -eq "block")
+        } else {
+            # No setting found - default is enabled
+            $controlMethod = "Default"
+            $enabled = $true
+        }
+    }
+
     Write-StatusIcon $enabled -Severity "Warning"
     Write-Host "Check apps and files" -ForegroundColor White
+    $remediation = if ($controlMethod -eq "Group Policy") {
+        "Managed by Group Policy - Set-ItemProperty -Path '$gpoPath' -Name '$gpoValueName' -Value 1"
+    } else {
+        "Set-ItemProperty -Path '$userPath' -Name '$userValueName' -Value 'Warn'"
+    }
     Add-SecurityCheck -Category "App & Browser Control" -Name "Check apps and files" -IsEnabled $enabled -Severity "Warning" `
-        -Remediation "Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name 'SmartScreenEnabled' -Value 'Warn'" `
-        -Details "SmartScreen checks downloads and apps for threats"
+        -Remediation $remediation `
+        -Details "SmartScreen checks downloads and apps for threats (Controlled by: $controlMethod)"
 
     # SmartScreen for Edge
     $edgeSmartScreen = Get-RegValue -Path "HKCU:\Software\Microsoft\Edge\SmartScreen" -Name "Enabled" -DefaultValue 1
@@ -1426,7 +1460,7 @@ try {
     # Removed: Display scan time
     
     # Set the timestamp this script was last edited
-    $lastEditedTimestamp = "2025-11-10 14:30:00" 
+    $lastEditedTimestamp = "2025-11-10 22:30:00" 
     Write-Host "  Last Edited: $lastEditedTimestamp" -ForegroundColor Green
     Write-Host "  www.AIIT.support All rights reserved" -ForegroundColor Green
     Write-Host ("─" * 60) -ForegroundColor DarkGray
