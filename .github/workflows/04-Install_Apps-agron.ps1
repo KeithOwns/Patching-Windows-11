@@ -460,36 +460,25 @@ if ($AppsToInstall.Count -gt 0) {
   $AppsToInstall = $AppsToInstall | Sort-Object InstallOrder
   Write-Host "--------------------------------------------------"
   Write-Warning "Missing applications detected: $($AppsToInstall.Count)"
+  Write-Host ""
+  Write-Host "The following applications will be installed:" -ForegroundColor Cyan
+  foreach ($app in $AppsToInstall) {
+    Write-Host "  • $($app.Name)" -ForegroundColor White
+  }
 
-  # Prompt to create restore point
-  $choice = Read-Host "Create a System Restore Point before installing? (Y/N)"
-  if ($choice -match '^[Yy]$') {
-    Write-Host "Creating System Restore Point..." -ForegroundColor Yellow
-    Write-Stamp "Creating restore point"
-    try {
-      # Enable System Protection if not already enabled
-      Enable-ComputerRestore -Drive "C:\" -ErrorAction SilentlyContinue
-
-      # Create restore point
-      Checkpoint-Computer -Description "Before app deployment - $(Get-Date -Format 'yyyy-MM-dd HH:mm')" -RestorePointType "APPLICATION_INSTALL" -ErrorAction Stop
-      Write-Host "Restore Point created successfully." -ForegroundColor Green
-      Write-Stamp "Restore point created"
-    } catch {
-      Write-Warning "Restore Point creation failed: $($_.Exception.Message)"
-      Write-Warning "Ensure System Protection is enabled on drive C:\"
-      Write-Stamp "Restore point failed: $($_.Exception.Message)"
-      $continue = Read-Host "Continue anyway? (Y/N)"
-      if ($continue -notmatch '^[Yy]$') {
-        Write-Host "Installation canceled by user." -ForegroundColor Yellow
-        Write-Stamp "Canceled by user"
-        Stop-Transcript
-        exit 0
-      }
-    }
+  # Prompt to proceed with installation
+  Write-Host ""
+  $choice = Read-Host "Install missing applications? (Y/N)"
+  if ($choice -notmatch '^[Yy]$') {
+    Write-Host "Installation canceled by user." -ForegroundColor Yellow
+    Write-Stamp "Installation canceled by user"
+    Stop-Transcript
+    exit 0
   }
 
   Write-Host "--------------------------------------------------"
   Write-Host "Installing missing applications..." -ForegroundColor Yellow
+  Write-Stamp "Starting application installation"
   foreach ($app in $AppsToInstall) { Invoke-GenericInstall -App $app }
 } else {
   Write-Host "All required applications are already installed." -ForegroundColor Green

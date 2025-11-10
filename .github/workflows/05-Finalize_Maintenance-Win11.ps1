@@ -532,6 +532,38 @@ try {
 
     Write-Host "`n  Log file: $script:LogPath" -ForegroundColor Gray
 
+    # Prompt to create restore point before maintenance
+    Write-Host "`n" -NoNewline
+    Write-Host ("─" * 70) -ForegroundColor DarkGray
+    $choice = Read-Host "Create a System Restore Point before maintenance? (Y/N)"
+    if ($choice -match '^[Yy]$') {
+        Write-Host "`n  Creating System Restore Point..." -ForegroundColor Yellow
+        Write-Log -Message "User requested restore point creation" -Level INFO
+        try {
+            # Enable System Protection if not already enabled
+            Enable-ComputerRestore -Drive "C:\" -ErrorAction SilentlyContinue
+
+            # Create restore point
+            Checkpoint-Computer -Description "Before maintenance - $(Get-Date -Format 'yyyy-MM-dd HH:mm')" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop
+            Write-Host "  ✓ Restore Point created successfully." -ForegroundColor Green
+            Write-Host "    Description: Before maintenance - $(Get-Date -Format 'yyyy-MM-dd HH:mm')" -ForegroundColor Gray
+            Write-Log -Message "Restore point created successfully" -Level SUCCESS
+        } catch {
+            Write-Host "  ✗ Restore Point creation failed: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "    Note: Ensure System Protection is enabled on drive C:\" -ForegroundColor Yellow
+            Write-Log -Message "Restore point creation failed: $($_.Exception.Message)" -Level ERROR
+            $continue = Read-Host "`nContinue with maintenance anyway? (Y/N)"
+            if ($continue -notmatch '^[Yy]$') {
+                Write-Host "`n  Maintenance canceled by user." -ForegroundColor Yellow
+                Write-Log -Message "Maintenance canceled by user after restore point failure" -Level WARNING
+                exit 0
+            }
+        }
+    } else {
+        Write-Host "  Skipping restore point creation." -ForegroundColor Gray
+        Write-Log -Message "User declined restore point creation" -Level INFO
+    }
+
     # Execute maintenance tasks
     Optimize-Disks
     Set-PowerSettings
