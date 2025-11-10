@@ -108,7 +108,7 @@ function Show-WUStatus {
     $ahe = Get-RegistryValue -Path $WU_UX -Name "ActiveHoursEnd"
     if ($ahs -ne $null -and $ahe -ne $null) {
         Write-Host "   " -NoNewline
-        Write-Host "Active hours: {0}:00 - {1}:00" -f $ahs,$ahe -ForegroundColor Gray
+        Write-Host ("Active hours: {0}:00 - {1}:00" -f $ahs,$ahe) -ForegroundColor Gray
     } else {
         Write-Host "   " -NoNewline
         Write-Host "Active hours: Auto (based on device activity)" -ForegroundColor Gray
