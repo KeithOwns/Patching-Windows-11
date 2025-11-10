@@ -1,0 +1,87 @@
+
+════════════════════════════════════════════════════════════
+  WINDOWS SECURITY STATUS REPORT
+════════════════════════════════════════════════════════════
+
+🛡️ Virus & threat protection
+────────────────────────────────────────────────────────────
+
+  ℹ️  Managed by third-party software: Sentinel Agent
+    Windows Defender checks skipped (third-party antivirus active)
+
+👤 Account protection
+────────────────────────────────────────────────────────────
+ ✓  Windows Hello
+ ✓  Dynamic lock
+ ✓  Facial recognition
+
+🔥 Firewall & network protection
+────────────────────────────────────────────────────────────
+ ✓  Domain network (Active Network: noc.agron.com)
+ ✓  Private network
+ ✓  Public network
+
+🌐 App & browser control
+────────────────────────────────────────────────────────────
+Get-MpPreference : Operation failed with the following error: 0x800106ba
+At line:519 char:20
++     $preferences = Get-MpPreference
++                    ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (MSFT_MpPreference:root\Microsoft\...FT_M
+   pPreference) [Get-MpPreference], CimException
+    + FullyQualifiedErrorId : HRESULT 0x800106ba,Get-MpPreference
+
+
+Reputation-based protection
+ ✓  Check apps and files
+ ✓  SmartScreen for Microsoft Edge
+
+Potentially unwanted app blocking
+ ✗ Block potentially unwanted apps
+ ✗ Block potentially unwanted downloads
+ ✓  SmartScreen for Microsoft Store apps
+
+Exploit protection
+Get-MpPreference : Operation failed with the following error: 0x800106ba
+At line:574 char:30
++         $networkProtection = Get-MpPreference | Select-Object -Expand ...
++                              ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (MSFT_MpPreference:root\Microsoft\...FT_M
+   pPreference) [Get-MpPreference], CimException
+    + FullyQualifiedErrorId : HRESULT 0x800106ba,Get-MpPreference
+
+ ✗ Network protection (inactive - requires Real-time protection)
+
+🔒 Device security
+────────────────────────────────────────────────────────────
+Get-MpPreference : Operation failed with the following error: 0x800106ba
+At line:653 char:20
++     $preferences = Get-MpPreference
++                    ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (MSFT_MpPreference:root\Microsoft\...FT_M
+   pPreference) [Get-MpPreference], CimException
+    + FullyQualifiedErrorId : HRESULT 0x800106ba,Get-MpPreference
+
+
+Core isolation
+ ✓  Memory integrity
+ ✗ Kernel-mode Hardware-enforced Stack Protection
+
+Security processor
+ ✓  Local Security Authority protection
+ ✓  Microsoft Vulnerable Driver Blocklist
+
+🔍 Scan information
+────────────────────────────────────────────────────────────
+  Last quick scan:      N/A
+  Last full scan:       N/A
+  Signature version:
+  Last updated:         N/A
+
+════════════════════════════════════════════════════════════
+  SECURITY SCORE: 81/100  [GOOD]
+  ✓ 13 Enabled  ✗ 4 Disabled
+════════════════════════════════════════════════════════════
+  *NOTE: Phishing protection for Edge must be manually set!
+  [ ] Open Phishing protection
+  [*] Continue without opening
