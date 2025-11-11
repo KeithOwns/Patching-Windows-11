@@ -868,12 +868,12 @@ function Write-PhishingMenu {
     
     # Draw options, clearing the rest of the line
     $clearLine = " " * ([Console]::WindowWidth - 50) # 50 is approx length of text
-
-    Write-Host "$prefix1 Enable Phishing protection (applies settings automatically)" -NoNewline -ForegroundColor White
+    
+    Write-Host "$prefix1 Open Phishing protection" -NoNewline -ForegroundColor White
     Write-Host $clearLine
-
+    
     [Console]::SetCursorPosition(0, $menuTop + 1)
-    Write-Host "$prefix2 Skip phishing protection setup" -NoNewline -ForegroundColor White
+    Write-Host "$prefix2 Continue without opening" -NoNewline -ForegroundColor White
     Write-Host $clearLine
 }
 
@@ -905,9 +905,9 @@ function Show-SecuritySummary {
         Write-Host ""
     }
     Write-Host ("═" * 60) -ForegroundColor Blue
-
+    
     # Updated Warning Text
-    Write-Host "  *NOTE: Phishing protection can be enabled automatically via registry" -ForegroundColor Cyan
+    Write-Host "  *NOTE: Phishing protection for Edge must be manually set!" -ForegroundColor Yellow
 
     # --- Interactive Menu ---
     $selectedOption = 0 # 0 = Open, 1 = Skip
@@ -955,7 +955,14 @@ function Show-SecuritySummary {
 
     # Perform action based on selection
     if ($selectedOption -eq 0) {
-        Enable-PhishingProtection | Out-Null
+        if (Open-PhishingSettings) {
+            $text = "[o] Open Windows Security > App & browser control > Reputation-based protection > Phishing protection (affects Edge browser)"
+            $paddingWidth = [System.Math]::Max(0, $Host.UI.RawUI.WindowSize.Width - $text.Length)
+            $paddedText = (" " * $paddingWidth) + $text
+            Write-Host $paddedText -ForegroundColor Green
+        } else {
+            Write-Host "  ✗ Failed to open settings." -ForegroundColor Red
+        }
     } else {
         # This branch is now reached by selecting option 1 and pressing Enter, or pressing Space on option 1
         Write-Host "  - Skipping Windows phishing protection setup." -ForegroundColor Gray
@@ -991,60 +998,39 @@ function Show-SecuritySummary {
     }
 }
 
-function Enable-PhishingProtection {
+function Open-PhishingSettings {
     <#
     .SYNOPSIS
-        Enables Phishing Protection settings via registry and optionally opens Windows Security
-    .DESCRIPTION
-        Configures the following registry settings:
-        - EnableWebContentEvaluation = 1 (SmartScreen for Store apps)
-        - SmartScreenEnabled = "Warn"
-        - WarnMaliciousAppsAndSites = 1 (Phishing protection)
-        Then opens Windows Security to show the user the updated settings.
+        Opens the Windows Security 'App & browser control' page
+        and attempts to send keystrokes to focus 'Reputation-based protection'.
     #>
     param()
-
+    
     try {
-        $success = $true
+        # This URI opens the "App & browser control" page directly.
+        Start-Process -FilePath "windowsdefender://appbrowser"
+        
+        # Wait 2 seconds for the app to open and load
+        Start-Sleep -Seconds 2
 
-        # Registry paths
-        $smartscreenPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\AppHost"
-        $phishKey = "HKCU:\Software\Microsoft\Windows Security Health\PhishingProtection"
-
-        # Ensure registry keys exist
-        if (!(Test-Path $smartscreenPath)) {
-            New-Item -Path $smartscreenPath -Force | Out-Null
+        # Attempt to send a 'TAB' key to move focus
+        $wshell = New-Object -ComObject WScript.Shell
+        
+        # Try to activate the window first to ensure it receives the keystroke
+        $activated = $wshell.AppActivate("Windows Security")
+        
+        if ($activated) {
+            Start-Sleep -Milliseconds 500 # Brief pause after activation
+            # Send 'TAB' twice to move focus
+            $wshell.SendKeys("{TAB 2}")
         }
-        if (!(Test-Path $phishKey)) {
-            New-Item -Path $phishKey -Force | Out-Null
-        }
-
-        # Enable SmartScreen for Store apps
-        Set-ItemProperty -Path $smartscreenPath -Name "EnableWebContentEvaluation" -Value 1 -Type DWord -ErrorAction Stop
-        Set-ItemProperty -Path $smartscreenPath -Name "PreventOverride" -Value 0 -Type DWord -ErrorAction Stop
-        Set-ItemProperty -Path $smartscreenPath -Name "SmartScreenEnabled" -Value "Warn" -Type String -ErrorAction Stop
-
-        # Enable Phishing Protection (Warn me about malicious apps and sites)
-        Set-ItemProperty -Path $phishKey -Name "WarnMaliciousAppsAndSites" -Value 1 -Type DWord -ErrorAction Stop
-
-        Write-Host "`n  ✓ Phishing protection settings enabled successfully" -ForegroundColor Green
-        Write-Host "    - SmartScreen for Store apps: Enabled" -ForegroundColor Gray
-        Write-Host "    - Warn about malicious apps and sites: Enabled" -ForegroundColor Gray
-
-        # Now open Windows Security to show the updated settings
-        try {
-            Start-Process -FilePath "windowsdefender://appbrowser" -ErrorAction Stop
-            Write-Host "    - Windows Security opened to verify settings" -ForegroundColor Gray
-        }
-        catch {
-            Write-Host "    ⚠ Settings applied but couldn't open Windows Security UI" -ForegroundColor Yellow
-        }
-
+        # Even if activation fails, the Start-Process likely succeeded.
         return $true
     }
     catch {
-        Write-Host "`n  ✗ Failed to enable phishing protection settings" -ForegroundColor Red
-        Write-Host "    Error: $($_.Exception.Message)" -ForegroundColor Red
+        # This block will run if the Start-Process command fails
+        Write-Host "`n[ERROR] Failed to open Windows Security. The URI scheme might not be supported on this system." -ForegroundColor Red
+        Write-Host "Error details: $_" -ForegroundColor Red
         return $false
     }
 }
@@ -1501,7 +1487,7 @@ try {
     # Removed: Display scan time
     
     # Set the timestamp this script was last edited
-    $lastEditedTimestamp = "2025-11-10 22:45:00" 
+    $lastEditedTimestamp = "2025-11-10 22:35:00" 
     Write-Host "  Last Edited: $lastEditedTimestamp" -ForegroundColor Green
     Write-Host "  www.AIIT.support All rights reserved" -ForegroundColor Green
     Write-Host ("─" * 60) -ForegroundColor DarkGray
