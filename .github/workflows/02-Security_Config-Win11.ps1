@@ -525,6 +525,7 @@ function Get-ReputationProtection {
     Write-Host "Reputation-based protection" -ForegroundColor Cyan
     # SmartScreen for Windows - Check apps and files
     # This checks both Group Policy (which overrides user settings) and local settings
+    # Logic taken from CHECK_Check apps and files.ps1
     $gpoPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\SmartScreen"
     $gpoValueName = "EnableSmartScreen"
     $userPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer"
@@ -533,32 +534,33 @@ function Get-ReputationProtection {
     $enabled = $false
     $controlMethod = "Unknown"
 
-    # Check for Group Policy setting first (overrides user setting)
-    try {
-        $gpoValue = Get-ItemPropertyValue -Path $gpoPath -Name $gpoValueName -ErrorAction Stop
-        $controlMethod = "Group Policy"
-        $enabled = ($gpoValue -eq 1)
-    } catch {
-        # No GPO, check local user setting
-        try {
-            $userValue = Get-ItemPropertyValue -Path $userPath -Name $userValueName -ErrorAction Stop
-            $controlMethod = "Local Setting"
+    # 1. Check for a Group Policy setting first (overrides user setting)
+    $gpoSetting = Get-ItemProperty -Path $gpoPath -Name $gpoValueName -ErrorAction SilentlyContinue
 
-            # Handle different value types (string or integer)
-            if ($userValue -is [string]) {
-                $valueStr = $userValue.ToLower()
-                # 'Warn', 'RequireAdmin', or 'Block' mean enabled
-                # 'Off' means disabled
-                $enabled = ($valueStr -ne "off")
-            } elseif ($userValue -is [int]) {
-                # Integer: 1 = enabled, 0 = disabled
-                $enabled = ($userValue -ne 0)
-            } else {
-                # Unknown type, check if it's truthy
-                $enabled = [bool]$userValue
+    if ($null -ne $gpoSetting) {
+        $controlMethod = "Group Policy"
+        if ($gpoSetting.$gpoValueName -eq 1) {
+            $enabled = $true
+        } elseif ($gpoSetting.$gpoValueName -eq 0) {
+            $enabled = $false
+        }
+    } else {
+        # 2. No GPO. Check the local user setting.
+        $userSetting = Get-ItemProperty -Path $userPath -Name $userValueName -ErrorAction SilentlyContinue
+
+        if ($null -ne $userSetting) {
+            $controlMethod = "Local Setting"
+            $value = $userSetting.$userValueName.ToLower()
+
+            # 'Warn' or 'Block' both mean the feature is enabled
+            if ($value -eq "warn" -or $value -eq "block") {
+                $enabled = $true
+            } elseif ($value -eq "off") {
+                $enabled = $false
             }
-        } catch {
-            # No setting found - default is enabled on modern Windows
+        } else {
+            # 3. No setting found in either location
+            # This typically means it's on by default ("Warn")
             $controlMethod = "Default"
             $enabled = $true
         }
