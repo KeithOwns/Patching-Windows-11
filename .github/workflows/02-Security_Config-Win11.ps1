@@ -534,22 +534,31 @@ function Get-ReputationProtection {
     $controlMethod = "Unknown"
 
     # Check for Group Policy setting first (overrides user setting)
-    $gpoSetting = Get-ItemProperty -Path $gpoPath -Name $gpoValueName -ErrorAction SilentlyContinue
-
-    if ($null -ne $gpoSetting) {
+    try {
+        $gpoValue = Get-ItemPropertyValue -Path $gpoPath -Name $gpoValueName -ErrorAction Stop
         $controlMethod = "Group Policy"
-        $enabled = ($gpoSetting.$gpoValueName -eq 1)
-    } else {
+        $enabled = ($gpoValue -eq 1)
+    } catch {
         # No GPO, check local user setting
-        $userSetting = Get-ItemProperty -Path $userPath -Name $userValueName -ErrorAction SilentlyContinue
-
-        if ($null -ne $userSetting) {
+        try {
+            $userValue = Get-ItemPropertyValue -Path $userPath -Name $userValueName -ErrorAction Stop
             $controlMethod = "Local Setting"
-            $value = $userSetting.$userValueName.ToLower()
-            # 'Warn' or 'Block' both mean the feature is enabled
-            $enabled = ($value -eq "warn" -or $value -eq "block")
-        } else {
-            # No setting found - default is enabled
+
+            # Handle different value types (string or integer)
+            if ($userValue -is [string]) {
+                $valueStr = $userValue.ToLower()
+                # 'Warn', 'RequireAdmin', or 'Block' mean enabled
+                # 'Off' means disabled
+                $enabled = ($valueStr -ne "off")
+            } elseif ($userValue -is [int]) {
+                # Integer: 1 = enabled, 0 = disabled
+                $enabled = ($userValue -ne 0)
+            } else {
+                # Unknown type, check if it's truthy
+                $enabled = [bool]$userValue
+            }
+        } catch {
+            # No setting found - default is enabled on modern Windows
             $controlMethod = "Default"
             $enabled = $true
         }
@@ -1487,7 +1496,7 @@ try {
     # Removed: Display scan time
     
     # Set the timestamp this script was last edited
-    $lastEditedTimestamp = "2025-11-10 22:35:00" 
+    $lastEditedTimestamp = "2025-11-12"
     Write-Host "  Last Edited: $lastEditedTimestamp" -ForegroundColor Green
     Write-Host "  www.AIIT.support All rights reserved" -ForegroundColor Green
     Write-Host ("─" * 60) -ForegroundColor DarkGray
