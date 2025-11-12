@@ -221,71 +221,115 @@ Write-Host "  • Launching Microsoft Store..." -ForegroundColor Gray
 # Open MS Store to Downloads and Updates page
 Start-Process "ms-windows-store://downloadsandupdates"
 
-# Wait for Microsoft Store to fully load and navigate to Library
+# Wait for Microsoft Store to fully load
 Write-Host "  • Waiting for Microsoft Store to load..." -ForegroundColor Gray
-Start-Sleep -Seconds 6
+Start-Sleep -Seconds 3
 
-# Attempt to activate the Microsoft Store window and press Enter to trigger update check
-Write-Host "  • Attempting to activate Microsoft Store and press Enter..." -ForegroundColor Gray
+# Run UI Automation in a SEPARATE PowerShell process to avoid assembly conflicts
+# This prevents UIAutomation assemblies from loading in the current session
+# which would conflict with Get-MpPreference in 02-Security_Config-Win11.ps1
+Write-Host "  • Attempting to click 'Get updates' button..." -ForegroundColor Gray
+
+$automationScript = @'
+# Load UI Automation assemblies
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 
 try {
-    # Add Windows API for window activation
-    Add-Type @"
-        using System;
-        using System.Runtime.InteropServices;
-        public class WindowHelper {
-            [DllImport("user32.dll")]
-            [return: MarshalAs(UnmanagedType.Bool)]
-            public static extern bool SetForegroundWindow(IntPtr hWnd);
+    # Wait a bit more for initial load
+    Start-Sleep -Seconds 2
 
-            [DllImport("user32.dll")]
-            public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-        }
-"@ -ErrorAction SilentlyContinue
+    # Get the root automation element
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
 
-    $shell = New-Object -ComObject WScript.Shell
-    $activated = $false
+    # Find the Microsoft Store window
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        "Microsoft Store"
+    )
 
-    # Try multiple times to activate the window
-    for ($i = 1; $i -le 3; $i++) {
-        # Try AppActivate first (works with partial window title)
-        $result = $shell.AppActivate("Microsoft Store")
+    $storeWindow = $desktop.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $condition
+    )
 
-        if ($result) {
-            $activated = $true
-            Write-Host "  ✓ Microsoft Store window activated (attempt $i)" -ForegroundColor Green
-            break
-        }
+    if ($storeWindow -eq $null) {
+        Write-Output "ERROR:Could not find Microsoft Store window"
+        exit 1
+    }
 
-        # Also try Windows API method
-        $hwnd = [WindowHelper]::FindWindow($null, "Microsoft Store")
-        if ($hwnd -ne [IntPtr]::Zero) {
-            [WindowHelper]::SetForegroundWindow($hwnd) | Out-Null
-            $activated = $true
-            Write-Host "  ✓ Microsoft Store window activated via API (attempt $i)" -ForegroundColor Green
-            break
-        }
+    # Wait for the page to fully load
+    Start-Sleep -Seconds 2
 
-        if ($i -lt 3) {
-            Start-Sleep -Milliseconds 500
+    # Search for the update button - try multiple possible names
+    $buttonTexts = @("Get updates", "Check for updates", "Update all")
+
+    foreach ($buttonText in $buttonTexts) {
+        $buttonCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $buttonText
+        )
+
+        $button = $storeWindow.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $buttonCondition
+        )
+
+        if ($button -ne $null) {
+            # Get the Invoke pattern to click the button
+            $invokePattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+
+            if ($invokePattern -ne $null) {
+                $invokePattern.Invoke()
+                Write-Output "SUCCESS:Clicked '$buttonText' button"
+                exit 0
+            }
         }
     }
 
-    if ($activated) {
-        # Give the window time to be fully activated and focused
-        Start-Sleep -Milliseconds 800
+    Write-Output "ERROR:Could not find update button"
+    exit 1
 
-        # Press Enter to trigger the "Get updates" button
-        $shell.SendKeys("{ENTER}")
-        Write-Host "  ✓ Enter key sent to check for updates" -ForegroundColor Green
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+    exit 1
+}
+'@
 
-        Start-Sleep -Seconds 2
+try {
+    # Execute automation in separate process
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "powershell.exe"
+    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"$automationScript`""
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+    $process.Start() | Out-Null
+
+    # Wait up to 15 seconds for the automation to complete
+    $timeout = $process.WaitForExit(15000)
+    $output = $process.StandardOutput.ReadToEnd()
+
+    if ($output -match "SUCCESS:(.+)") {
+        Write-Host "  ✓ $($matches[1])" -ForegroundColor Green
+    } elseif ($output -match "ERROR:(.+)") {
+        Write-Host "  ⚠ $($matches[1])" -ForegroundColor Yellow
+        Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
+    } elseif (-not $timeout) {
+        Write-Host "  ⚠ Automation timed out after 15 seconds" -ForegroundColor Yellow
+        Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
+        $process.Kill()
     } else {
-        Write-Host "  ⚠ Could not activate Microsoft Store window" -ForegroundColor Yellow
+        Write-Host "  ⚠ Automation completed with unknown status" -ForegroundColor Yellow
         Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
     }
 } catch {
-    Write-Host "  ⚠ Error during automation: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "  ⚠ Could not start automation process: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
 }
 
