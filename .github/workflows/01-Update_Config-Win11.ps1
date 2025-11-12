@@ -223,26 +223,61 @@ Start-Process "ms-windows-store://downloadsandupdates"
 
 # Wait for Microsoft Store to fully load and navigate to Library
 Write-Host "  • Waiting for Microsoft Store to load..." -ForegroundColor Gray
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 6
 
-# Attempt to activate the Microsoft Store window and press Enter
-Write-Host "  • Attempting to activate Microsoft Store and trigger update..." -ForegroundColor Gray
+# Attempt to activate the Microsoft Store window and press Enter to trigger update check
+Write-Host "  • Attempting to activate Microsoft Store and press Enter..." -ForegroundColor Gray
 
 try {
-    $shell = New-Object -ComObject WScript.Shell
+    # Add Windows API for window activation
+    Add-Type @"
+        using System;
+        using System.Runtime.InteropServices;
+        public class WindowHelper {
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool SetForegroundWindow(IntPtr hWnd);
 
-    # Try to activate the Microsoft Store window
-    $activated = $shell.AppActivate("Microsoft Store")
+            [DllImport("user32.dll")]
+            public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+        }
+"@ -ErrorAction SilentlyContinue
+
+    $shell = New-Object -ComObject WScript.Shell
+    $activated = $false
+
+    # Try multiple times to activate the window
+    for ($i = 1; $i -le 3; $i++) {
+        # Try AppActivate first (works with partial window title)
+        $result = $shell.AppActivate("Microsoft Store")
+
+        if ($result) {
+            $activated = $true
+            Write-Host "  ✓ Microsoft Store window activated (attempt $i)" -ForegroundColor Green
+            break
+        }
+
+        # Also try Windows API method
+        $hwnd = [WindowHelper]::FindWindow($null, "Microsoft Store")
+        if ($hwnd -ne [IntPtr]::Zero) {
+            [WindowHelper]::SetForegroundWindow($hwnd) | Out-Null
+            $activated = $true
+            Write-Host "  ✓ Microsoft Store window activated via API (attempt $i)" -ForegroundColor Green
+            break
+        }
+
+        if ($i -lt 3) {
+            Start-Sleep -Milliseconds 500
+        }
+    }
 
     if ($activated) {
-        Write-Host "  ✓ Microsoft Store window activated" -ForegroundColor Green
+        # Give the window time to be fully activated and focused
+        Start-Sleep -Milliseconds 800
 
-        # Wait a moment for activation
-        Start-Sleep -Milliseconds 500
-
-        # Press Enter to trigger the update
+        # Press Enter to trigger the "Get updates" button
         $shell.SendKeys("{ENTER}")
-        Write-Host "  ✓ Enter key sent to Microsoft Store" -ForegroundColor Green
+        Write-Host "  ✓ Enter key sent to check for updates" -ForegroundColor Green
 
         Start-Sleep -Seconds 2
     } else {
@@ -250,7 +285,7 @@ try {
         Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
     }
 } catch {
-    Write-Host "  ⚠ Error activating Microsoft Store: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "  ⚠ Error during automation: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host "    Please manually click 'Get updates' in the Microsoft Store" -ForegroundColor Gray
 }
 
