@@ -523,56 +523,55 @@ function Get-ReputationProtection {
     }
 
     Write-Host "Reputation-based protection" -ForegroundColor Cyan
-    # SmartScreen for Windows - Check apps and files
-    # This checks both Group Policy (which overrides user settings) and local settings
-    # Logic taken from CHECK_Check apps and files.ps1
-    $gpoPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\SmartScreen"
-    $gpoValueName = "EnableSmartScreen"
+    
+    # --- Start of logic from 'Check_Check apps and files.ps1' ---
+    $policyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
+    $policyProperty = "EnableSmartScreen"
     $userPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer"
-    $userValueName = "SmartScreenEnabled"
+    $userProperty = "SmartScreenEnabled"
 
-    $enabled = $false
+    $enabled = $false # Default to false, will be set to true if 'On'
     $controlMethod = "Unknown"
 
-    # 1. Check for a Group Policy setting first (overrides user setting)
-    $gpoSetting = Get-ItemProperty -Path $gpoPath -Name $gpoValueName -ErrorAction SilentlyContinue
-
-    if ($null -ne $gpoSetting) {
+    # 1. Check for an enforced Group Policy setting
+    $policyValue = Get-ItemProperty -Path $policyPath -Name $policyProperty -ErrorAction SilentlyContinue
+    
+    if ($null -ne $policyValue) {
         $controlMethod = "Group Policy"
-        if ($gpoSetting.$gpoValueName -eq 1) {
+        if ($policyValue.EnableSmartScreen -eq 1) {
             $enabled = $true
-        } elseif ($gpoSetting.$gpoValueName -eq 0) {
+        } elseif ($policyValue.EnableSmartScreen -eq 0) {
             $enabled = $false
         }
     } else {
-        # 2. No GPO. Check the local user setting.
-        $userSetting = Get-ItemProperty -Path $userPath -Name $userValueName -ErrorAction SilentlyContinue
-
-        if ($null -ne $userSetting) {
-            $controlMethod = "Local Setting"
-            $value = $userSetting.$userValueName.ToLower()
-
-            # 'Warn' or 'Block' both mean the feature is enabled
-            if ($value -eq "warn" -or $value -eq "block") {
-                $enabled = $true
-            } elseif ($value -eq "off") {
-                $enabled = $false
-            }
+        # 2. If no policy is set, check the user setting
+        $userValue = Get-ItemProperty -Path $userPath -Name $userProperty -ErrorAction SilentlyContinue
+        
+        $controlMethod = "Local Setting"
+        # If the value exists and is literally "Off", it's off.
+        if ($null -ne $userValue -and $userValue.$userProperty -eq "Off") {
+            $enabled = $false
         } else {
-            # 3. No setting found in either location
-            # This typically means it's on by default ("Warn")
-            $controlMethod = "Default"
+            # If the value doesn't exist or is not "Off", it's considered On (default).
             $enabled = $true
+            if ($null -eq $userValue) {
+                $controlMethod = "Default"
+            }
         }
     }
+    
+    # --- End of logic from 'Check_Check apps and files.ps1' ---
 
+    # --- Integrate into main script's format ---
     Write-StatusIcon $enabled -Severity "Warning"
     Write-Host "Check apps and files" -ForegroundColor White
+    
     $remediation = if ($controlMethod -eq "Group Policy") {
-        "Managed by Group Policy - Set-ItemProperty -Path '$gpoPath' -Name '$gpoValueName' -Value 1"
+        "Managed by Group Policy - Set-ItemProperty -Path '$policyPath' -Name '$policyProperty' -Value 1"
     } else {
-        "Set-ItemProperty -Path '$userPath' -Name '$userValueName' -Value 'Warn'"
+        "Set-ItemProperty -Path '$userPath' -Name '$userProperty' -Value 'Warn' # (Or remove the 'Off' value)"
     }
+    
     Add-SecurityCheck -Category "App & Browser Control" -Name "Check apps and files" -IsEnabled $enabled -Severity "Warning" `
         -Remediation $remediation `
         -Details "SmartScreen checks downloads and apps for threats (Controlled by: $controlMethod)"
