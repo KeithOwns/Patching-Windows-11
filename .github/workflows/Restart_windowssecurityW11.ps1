@@ -25,8 +25,8 @@
 
 .NOTES
     Author: Keith @ AI+IT Support
-    Version: 1.0.0
-    Last Updated: 2025-11-11
+    Version: 1.0.2
+    Last Updated: 2025-11-12
     
     Requirements:
     - Windows 10/11
@@ -35,6 +35,10 @@
     Processes targeted:
     - SecurityHealthSystray.exe (System tray icon)
     - SecHealthUI.exe (Main UI process)
+    
+    Change Log:
+    1.0.1 - Removed explicit 'exit' calls and added Read-Host to keep the console window open.
+    1.0.2 - Removed Read-Host command to allow the console window to close automatically upon completion.
 #>
 
 [CmdletBinding()]
@@ -216,7 +220,6 @@ try {
         else {
             Write-Host ""
             Write-Log "Failed to restart Windows Security app" -Level Error
-            exit 1
         }
     }
     else {
@@ -227,14 +230,16 @@ try {
     Write-Log "================================" -Level Info
     Write-Log "Operation completed successfully" -Level Info
     Write-Log "================================" -Level Info
-    
-    exit 0
+
+    # Removed exit 0/1 calls here.
 }
 catch {
     Write-Host ""
     Write-Log "An unexpected error occurred: $($_.Exception.Message)" -Level Error
     Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error
-    exit 1
+    # Removed exit 1 call here.
 }
+
+# The Read-Host section was removed here to allow the window to close automatically.
 
 #EndRegion Main Script
