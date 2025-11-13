@@ -919,7 +919,8 @@ function Show-SecuritySummary {
     # Updated Warning Text
     Write-Host "  *NOTE: Phishing protection for Edge must be manually set!" -ForegroundColor Yellow
 
-    # --- Interactive Menu ---
+    # --- Interactive Menu (COMMENTED OUT) ---
+    <#
     $selectedOption = 0 # 0 = Open, 1 = Skip
     $menuTop = [Console]::CursorTop # Store where the menu starts
     $choiceMade = $false
@@ -977,6 +978,7 @@ function Show-SecuritySummary {
         # This branch is now reached by selecting option 1 and pressing Enter, or pressing Space on option 1
         Write-Host "  - Skipping Windows phishing protection setup." -ForegroundColor Gray
     }
+    #>
     
     # Show critical issues if any
     if ($critical -gt 0) {
