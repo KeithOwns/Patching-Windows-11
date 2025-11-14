@@ -1667,6 +1667,53 @@ function Enable-TamperProtection {
     }
 }
 
+function Enable-ControlledFolderAccess {
+    <#
+    .SYNOPSIS
+        Enables Controlled Folder Access (ransomware protection)
+    .DESCRIPTION
+        Enables Controlled Folder Access to protect important folders from ransomware.
+        Requires Real-time Protection to be enabled first.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Controlled folder access..." -ForegroundColor Cyan -NoNewline
+
+        # Check if Real-time Protection is enabled (required for CFA)
+        $realtimeStatus = Get-MpPreference -ErrorAction Stop | Select-Object -ExpandProperty DisableRealtimeMonitoring
+
+        if ($realtimeStatus -eq $true) {
+            Write-Host " BLOCKED" -ForegroundColor Red
+            Write-Host "    ⚠️  Real-time Protection must be enabled first" -ForegroundColor Yellow
+            Write-Host "    Controlled Folder Access requires Real-time Protection to function" -ForegroundColor Gray
+            return $false
+        }
+
+        # Enable Controlled Folder Access
+        Set-MpPreference -EnableControlledFolderAccess Enabled -ErrorAction Stop
+
+        Start-Sleep -Seconds 1
+
+        # Verify the setting
+        $status = Get-MpPreference | Select-Object -ExpandProperty EnableControlledFolderAccess
+
+        if ($status -eq 1) {
+            Write-Host " ENABLED" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  May be blocked by Group Policy or other restrictions" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Apply-SecuritySettings {
     <#
     .SYNOPSIS
@@ -1692,6 +1739,14 @@ function Apply-SecuritySettings {
 
             "Tamper protection" {
                 if (Enable-TamperProtection) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Controlled folder access" {
+                if (Enable-ControlledFolderAccess) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
