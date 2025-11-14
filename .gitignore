@@ -1,0 +1,5 @@
+# Temporary and local files
+TXT/
+
+# Claude Code configuration
+.claude/
