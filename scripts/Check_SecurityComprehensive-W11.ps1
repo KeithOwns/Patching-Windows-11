@@ -2280,6 +2280,81 @@ function Enable-KernelStackProtection {
     }
 }
 
+function Enable-LSAProtection {
+    <#
+    .SYNOPSIS
+        Enables Local Security Authority (LSA) protection
+    .DESCRIPTION
+        Enables LSA protection (RunAsPPL) through registry settings.
+        This protects the LSA process from credential theft attacks.
+        Requires a system restart to take effect.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Local Security Authority protection..." -ForegroundColor Cyan -NoNewline
+
+        # --- From 'Enable_LSA-W11.ps1' ---
+        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+        $regName = "RunAsPPL"
+        $regValue = 1  # 1 = Enabled
+        $regType = "DWord"
+
+        # Check current status
+        $currentValue = Get-ItemProperty -Path $regPath -Name $regName -ErrorAction SilentlyContinue
+        if ($currentValue -and $currentValue.$regName -eq 1) {
+            Write-Host " ALREADY ENABLED" -ForegroundColor Green
+            return $true
+        }
+
+        # Check if the registry path exists
+        if (-not (Test-Path $regPath)) {
+            try {
+                New-Item -Path $regPath -Force -ErrorAction Stop | Out-Null
+            } catch {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Failed to create registry path (requires admin rights)" -ForegroundColor Yellow
+                return $false
+            }
+        }
+
+        # Set the RunAsPPL value
+        try {
+            Set-ItemProperty -Path $regPath -Name $regName -Value $regValue -Type $regType -Force -ErrorAction Stop
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Failed to set RunAsPPL value: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        Start-Sleep -Seconds 1
+
+        # Verify the change
+        try {
+            $verifyValue = (Get-ItemProperty -Path $regPath -Name $regName -ErrorAction Stop).$regName
+
+            if ($verifyValue -eq 1) {
+                Write-Host " ENABLED" -ForegroundColor Green
+                Write-Host "    ⚠️  RESTART REQUIRED for changes to take effect" -ForegroundColor Yellow
+                return $true
+            } else {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Verification failed (RunAsPPL: $verifyValue)" -ForegroundColor Yellow
+                return $false
+            }
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Verification failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Enable-SmartAppControl {
     <#
     .SYNOPSIS
@@ -2426,6 +2501,14 @@ function Apply-SecuritySettings {
 
             "Kernel-mode Hardware-enforced Stack Protection" {
                 if (Enable-KernelStackProtection) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Local Security Authority protection" {
+                if (Enable-LSAProtection) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
