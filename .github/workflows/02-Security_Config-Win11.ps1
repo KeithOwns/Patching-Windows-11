@@ -577,13 +577,78 @@ function Get-ReputationProtection {
         -Details "SmartScreen checks downloads and apps for threats (Controlled by: $controlMethod)"
 
     # SmartScreen for Edge
-    $edgeSmartScreen = Get-RegValue -Path "HKCU:\Software\Microsoft\Edge\SmartScreen" -Name "Enabled" -DefaultValue 1
-    $enabled = $edgeSmartScreen -ne 0
+    # --- Start of logic from 'Check_SmartScreen-W11.ps1' ---
+    $RegPath_MachinePolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+    $RegPath_UserPolicy    = "HKCU:\SOFTWARE\Policies\Microsoft\Edge"
+    $RegPath_UserSetting   = "HKCU:\Software\Microsoft\Edge\SmartScreenEnabled"
+    $RegPath_UserSetting2  = "HKCU:\Software\Microsoft\Edge"
+
+    $enabled = $false
+    $controlMethod = "Unknown"
+    $IsConfigured = $false
+
+    # 1. Check Machine Group Policy (Highest Priority)
+    if (Test-Path $RegPath_MachinePolicy) {
+        $val = Get-ItemProperty -Path $RegPath_MachinePolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+        if ($null -ne $val) {
+            $IsConfigured = $true
+            $controlMethod = "Group Policy (Machine)"
+            if ($val.SmartScreenEnabled -eq 1) { $enabled = $true } else { $enabled = $false }
+        }
+    }
+
+    # 2. Check User Group Policy (If Machine Policy not set)
+    if (-not $IsConfigured -and (Test-Path $RegPath_UserPolicy)) {
+        $val = Get-ItemProperty -Path $RegPath_UserPolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+        if ($null -ne $val) {
+            $IsConfigured = $true
+            $controlMethod = "Group Policy (User)"
+            if ($val.SmartScreenEnabled -eq 1) { $enabled = $true } else { $enabled = $false }
+        }
+    }
+
+    # 3. Check User Personal Settings (If no Policy set)
+    if (-not $IsConfigured) {
+        # Check Location A: Key is SmartScreenEnabled, Value is (default)
+        if (Test-Path $RegPath_UserSetting) {
+            $val = Get-ItemProperty -Path $RegPath_UserSetting -Name "(default)" -ErrorAction SilentlyContinue
+            if ($null -ne $val) {
+                $IsConfigured = $true
+                $controlMethod = "User Setting (Registry Key)"
+                if ($val.'(default)' -eq 1) { $enabled = $true } else { $enabled = $false }
+            }
+        }
+
+        # Check Location B: Key is Edge, Value is SmartScreenEnabled
+        if (-not $IsConfigured -and (Test-Path $RegPath_UserSetting2)) {
+            $val = Get-ItemProperty -Path $RegPath_UserSetting2 -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+            if ($null -ne $val.SmartScreenEnabled) {
+                $IsConfigured = $true
+                $controlMethod = "User Setting (Value)"
+                if ($val.SmartScreenEnabled -eq 1) { $enabled = $true } else { $enabled = $false }
+            }
+        }
+    }
+
+    # 4. Default Behavior - Windows 11 defaults to ON if nothing is configured
+    if (-not $IsConfigured) {
+        $enabled = $true
+        $controlMethod = "Windows Default"
+    }
+    # --- End of logic from 'Check_SmartScreen-W11.ps1' ---
+
     Write-StatusIcon $enabled -Severity "Warning"
     Write-Host "SmartScreen for Microsoft Edge" -ForegroundColor White
+
+    $remediation = if ($controlMethod -like "Group Policy*") {
+        "Managed by Group Policy - Contact administrator or modify policy registry"
+    } else {
+        "Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Edge' -Name 'SmartScreenEnabled' -Value 1"
+    }
+
     Add-SecurityCheck -Category "App & Browser Control" -Name "SmartScreen for Microsoft Edge" -IsEnabled $enabled -Severity "Warning" `
-        -Remediation "Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Edge\SmartScreen' -Name 'Enabled' -Value 1" `
-        -Details "SmartScreen protection in Microsoft Edge browser"
+        -Remediation $remediation `
+        -Details "SmartScreen protection in Microsoft Edge browser (Controlled by: $controlMethod)"
 
     # PUA Protection
     $enabled = $false
@@ -1798,34 +1863,90 @@ function Enable-SmartScreenEdge {
         Enables SmartScreen for Microsoft Edge
     .DESCRIPTION
         Enables SmartScreen protection in Microsoft Edge browser.
+        Checks Group Policy and local settings in order of precedence.
     #>
     param()
 
     try {
         Write-Host "`n  • SmartScreen for Microsoft Edge..." -ForegroundColor Cyan -NoNewline
 
-        $edgePath = "HKCU:\Software\Microsoft\Edge\SmartScreen"
-        $edgeProperty = "Enabled"
+        $RegPath_MachinePolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+        $RegPath_UserPolicy    = "HKCU:\SOFTWARE\Policies\Microsoft\Edge"
+        $RegPath_UserSetting   = "HKCU:\Software\Microsoft\Edge"
 
-        # Create registry path if it doesn't exist
-        if (-not (Test-Path $edgePath)) {
-            New-Item -Path $edgePath -Force | Out-Null
+        # Check if controlled by Machine Group Policy
+        $machinePolicyVal = Get-ItemProperty -Path $RegPath_MachinePolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+        if ($null -ne $machinePolicyVal) {
+            # Try to set machine policy
+            try {
+                Set-ItemProperty -Path $RegPath_MachinePolicy -Name "SmartScreenEnabled" -Value 1 -ErrorAction Stop
+                Start-Sleep -Seconds 1
+
+                # Verify
+                $newValue = Get-ItemProperty -Path $RegPath_MachinePolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+                if ($newValue.SmartScreenEnabled -eq 1) {
+                    Write-Host " ENABLED (via Machine Policy)" -ForegroundColor Green
+                    return $true
+                } else {
+                    Write-Host " FAILED" -ForegroundColor Red
+                    Write-Host "    ⚠️  Machine Group Policy may be enforced by domain administrator" -ForegroundColor Yellow
+                    return $false
+                }
+            } catch {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Cannot modify Machine Group Policy (requires admin rights)" -ForegroundColor Yellow
+                return $false
+            }
         }
 
-        # Set SmartScreen to enabled (1)
-        Set-ItemProperty -Path $edgePath -Name $edgeProperty -Value 1 -ErrorAction Stop
+        # Check if controlled by User Group Policy
+        $userPolicyVal = Get-ItemProperty -Path $RegPath_UserPolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+        if ($null -ne $userPolicyVal) {
+            # Try to set user policy
+            try {
+                Set-ItemProperty -Path $RegPath_UserPolicy -Name "SmartScreenEnabled" -Value 1 -ErrorAction Stop
+                Start-Sleep -Seconds 1
 
-        Start-Sleep -Seconds 1
+                # Verify
+                $newValue = Get-ItemProperty -Path $RegPath_UserPolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+                if ($newValue.SmartScreenEnabled -eq 1) {
+                    Write-Host " ENABLED (via User Policy)" -ForegroundColor Green
+                    return $true
+                } else {
+                    Write-Host " FAILED" -ForegroundColor Red
+                    Write-Host "    ⚠️  User Group Policy may be enforced" -ForegroundColor Yellow
+                    return $false
+                }
+            } catch {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Cannot modify User Group Policy" -ForegroundColor Yellow
+                return $false
+            }
+        }
 
-        # Verify the setting
-        $newValue = Get-ItemProperty -Path $edgePath -Name $edgeProperty -ErrorAction SilentlyContinue
+        # No policy set - use user personal setting
+        try {
+            if (-not (Test-Path $RegPath_UserSetting)) {
+                New-Item -Path $RegPath_UserSetting -Force | Out-Null
+            }
 
-        if ($newValue.$edgeProperty -ne 0) {
-            Write-Host " ENABLED" -ForegroundColor Green
-            return $true
-        } else {
+            Set-ItemProperty -Path $RegPath_UserSetting -Name "SmartScreenEnabled" -Value 1 -ErrorAction Stop
+
+            Start-Sleep -Seconds 1
+
+            # Verify
+            $newValue = Get-ItemProperty -Path $RegPath_UserSetting -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+            if ($newValue.SmartScreenEnabled -eq 1) {
+                Write-Host " ENABLED" -ForegroundColor Green
+                return $true
+            } else {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Setting was not applied" -ForegroundColor Yellow
+                return $false
+            }
+        } catch {
             Write-Host " FAILED" -ForegroundColor Red
-            Write-Host "    ⚠️  Setting was not applied" -ForegroundColor Yellow
+            Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
             return $false
         }
 
