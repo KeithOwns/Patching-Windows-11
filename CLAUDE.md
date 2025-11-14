@@ -6,7 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PatchW11 is a Windows 11 security hardening and maintenance automation toolkit for enterprise environments. It provides comprehensive security configuration, monitoring, remediation, and system maintenance through modular PowerShell scripts.
 
-**Note**: All PowerShell scripts are located in `.github/workflows/` (not a conventional GitHub Actions setup - just used as a storage directory).
+## Directory Structure
+
+```
+PatchW11/
+├── scripts/          # All PowerShell scripts and batch files
+├── docs/            # Documentation (ENHANCEMENT_GUIDE.md)
+├── CLAUDE.md        # AI development guidance (this file)
+├── README.md        # User documentation
+└── .gitignore
+```
 
 ## Common Commands
 
@@ -15,7 +24,7 @@ PatchW11 is a Windows 11 security hardening and maintenance automation toolkit f
 ```powershell
 # Test individual scripts (must run as Administrator)
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-cd .github/workflows
+cd scripts
 
 # Run security check (read-only)
 .\SecurityCheckONLY-W11.ps1
@@ -305,5 +314,5 @@ $content | Out-File -FilePath $path -Encoding UTF8
 
 ## Documentation References
 
-- **ENHANCEMENT_GUIDE.md** - Evolution from v1 to v2 security checking, severity guidelines
-- **README.md** - Original documentation for Sonnet-StatusReport.ps1 (read-only predecessor)
+- **docs/ENHANCEMENT_GUIDE.md** - Evolution from v1 to v2 security checking, severity guidelines
+- **README.md** - User-facing documentation and quick start guide
