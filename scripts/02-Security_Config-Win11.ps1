@@ -2035,6 +2035,68 @@ function Enable-PUAProtection {
     }
 }
 
+function Enable-SmartScreenStoreApps {
+    <#
+    .SYNOPSIS
+        Enables SmartScreen for Microsoft Store apps
+    .DESCRIPTION
+        Enables web content evaluation for Microsoft Store apps.
+        Sets HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost\EnableWebContentEvaluation to 1.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • SmartScreen for Microsoft Store apps..." -ForegroundColor Cyan -NoNewline
+
+        # --- From 'Enable_MSstoreSSFW11.ps1' ---
+        $userPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost"
+        $propertyName = "EnableWebContentEvaluation"
+
+        # Create registry path if it doesn't exist
+        if (-not (Test-Path $userPath)) {
+            try {
+                New-Item -Path $userPath -Force | Out-Null
+            } catch {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Failed to create registry path" -ForegroundColor Yellow
+                return $false
+            }
+        }
+
+        # Set EnableWebContentEvaluation to 1
+        try {
+            $currentValue = Get-ItemProperty -Path $userPath -Name $propertyName -ErrorAction SilentlyContinue
+            if ($null -eq $currentValue) {
+                New-ItemProperty -Path $userPath -Name $propertyName -PropertyType DWord -Value 1 -Force | Out-Null
+            } else {
+                Set-ItemProperty -Path $userPath -Name $propertyName -Value 1 -ErrorAction Stop
+            }
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Failed to set registry value: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        Start-Sleep -Seconds 1
+
+        # Verify the setting
+        $verifyValue = Get-ItemProperty -Path $userPath -Name $propertyName -ErrorAction SilentlyContinue
+        if ($null -ne $verifyValue -and $verifyValue.$propertyName -eq 1) {
+            Write-Host " ENABLED" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Verification failed (value: $($verifyValue.$propertyName))" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Enable-SmartAppControl {
     <#
     .SYNOPSIS
@@ -2157,6 +2219,14 @@ function Apply-SecuritySettings {
 
             "Block potentially unwanted apps" {
                 if (Enable-PUAProtection) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "SmartScreen for Microsoft Store apps" {
+                if (Enable-SmartScreenStoreApps) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
