@@ -2097,6 +2097,102 @@ function Enable-SmartScreenStoreApps {
     }
 }
 
+function Enable-MemoryIntegrity {
+    <#
+    .SYNOPSIS
+        Enables Memory Integrity (Hypervisor-protected Code Integrity)
+    .DESCRIPTION
+        Enables Memory Integrity through registry settings.
+        Sets WasEnabledBy = 2 to allow user control via Windows Security GUI.
+        Requires a system restart to take effect.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Memory integrity..." -ForegroundColor Cyan -NoNewline
+
+        # --- From 'Enable_MemoryIntegrity.ps1' ---
+        $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"
+
+        # Check Windows version compatibility
+        $osVersion = [System.Environment]::OSVersion.Version
+        if ($osVersion.Major -lt 10 -or ($osVersion.Major -eq 10 -and $osVersion.Build -lt 17134)) {
+            Write-Host " NOT SUPPORTED" -ForegroundColor DarkGray
+            Write-Host "    ℹ️  Requires Windows 10 build 17134 (version 1803) or later" -ForegroundColor Cyan
+            return $false
+        }
+
+        # Check hypervisor support
+        try {
+            $hypervisorPresent = (Get-ComputerInfo -Property HyperVisorPresent -ErrorAction SilentlyContinue).HyperVisorPresent
+            if (-not $hypervisorPresent) {
+                Write-Host " NOT SUPPORTED" -ForegroundColor DarkGray
+                Write-Host "    ℹ️  Requires virtualization enabled in BIOS/UEFI (Intel VT-x or AMD-V)" -ForegroundColor Cyan
+                Write-Host "    ℹ️  Requires SLAT-capable CPU" -ForegroundColor Cyan
+                return $false
+            }
+        } catch {
+            # If we can't determine hypervisor support, continue anyway
+        }
+
+        # Create registry path if it doesn't exist
+        if (-not (Test-Path $registryPath)) {
+            try {
+                New-Item -Path $registryPath -Force | Out-Null
+            } catch {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Failed to create registry path (requires admin rights)" -ForegroundColor Yellow
+                return $false
+            }
+        }
+
+        # Set Enabled = 1
+        try {
+            Set-ItemProperty -Path $registryPath -Name "Enabled" -Value 1 -Type DWord -Force
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Failed to set Enabled value: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        # Set WasEnabledBy = 2 (allows user control, prevents "managed by administrator" message)
+        try {
+            Set-ItemProperty -Path $registryPath -Name "WasEnabledBy" -Value 2 -Type DWord -Force
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Failed to set WasEnabledBy value: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        Start-Sleep -Seconds 1
+
+        # Verify the changes
+        try {
+            $enabledValue = (Get-ItemProperty -Path $registryPath -Name "Enabled" -ErrorAction Stop).Enabled
+            $wasEnabledByValue = (Get-ItemProperty -Path $registryPath -Name "WasEnabledBy" -ErrorAction Stop).WasEnabledBy
+
+            if ($enabledValue -eq 1 -and $wasEnabledByValue -eq 2) {
+                Write-Host " ENABLED" -ForegroundColor Green
+                Write-Host "    ⚠️  RESTART REQUIRED for changes to take effect" -ForegroundColor Yellow
+                return $true
+            } else {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Verification failed (Enabled: $enabledValue, WasEnabledBy: $wasEnabledByValue)" -ForegroundColor Yellow
+                return $false
+            }
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Verification failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Enable-SmartAppControl {
     <#
     .SYNOPSIS
@@ -2227,6 +2323,14 @@ function Apply-SecuritySettings {
 
             "SmartScreen for Microsoft Store apps" {
                 if (Enable-SmartScreenStoreApps) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Memory integrity" {
+                if (Enable-MemoryIntegrity) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
