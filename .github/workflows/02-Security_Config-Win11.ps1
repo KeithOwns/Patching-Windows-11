@@ -1862,91 +1862,76 @@ function Enable-SmartScreenEdge {
     .SYNOPSIS
         Enables SmartScreen for Microsoft Edge
     .DESCRIPTION
-        Enables SmartScreen protection in Microsoft Edge browser.
-        Checks Group Policy and local settings in order of precedence.
+        Sets SmartScreen for Microsoft Edge to ON without locking the UI.
+        1. Removes any existing User Group Policy (removes "Managed" warning)
+        2. Sets the User Preference registry key used by Windows Security
+        Result: SmartScreen is enabled, but user can still toggle it manually.
     #>
     param()
 
     try {
         Write-Host "`n  • SmartScreen for Microsoft Edge..." -ForegroundColor Cyan -NoNewline
 
-        $RegPath_MachinePolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
-        $RegPath_UserPolicy    = "HKCU:\SOFTWARE\Policies\Microsoft\Edge"
-        $RegPath_UserSetting   = "HKCU:\Software\Microsoft\Edge"
+        # --- From 'Enable_SmartScreen-W11.ps1' ---
+        $PolicyPath = "HKCU:\SOFTWARE\Policies\Microsoft\Edge"
+        $PolicyName = "SmartScreenEnabled"
+        $PrefPath   = "HKCU:\Software\Microsoft\Edge\SmartScreenEnabled"
 
-        # Check if controlled by Machine Group Policy
-        $machinePolicyVal = Get-ItemProperty -Path $RegPath_MachinePolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
+        # Check if controlled by Machine Group Policy (we can't modify this)
+        $machinePolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+        $machinePolicyVal = Get-ItemProperty -Path $machinePolicyPath -Name $PolicyName -ErrorAction SilentlyContinue
         if ($null -ne $machinePolicyVal) {
-            # Try to set machine policy
-            try {
-                Set-ItemProperty -Path $RegPath_MachinePolicy -Name "SmartScreenEnabled" -Value 1 -ErrorAction Stop
-                Start-Sleep -Seconds 1
+            Write-Host " BLOCKED" -ForegroundColor Yellow
+            Write-Host "    ⚠️  Managed by Machine Group Policy (domain administrator)" -ForegroundColor Yellow
+            Write-Host "    ℹ️  Cannot modify without administrator privileges" -ForegroundColor Cyan
+            return $false
+        }
 
-                # Verify
-                $newValue = Get-ItemProperty -Path $RegPath_MachinePolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
-                if ($newValue.SmartScreenEnabled -eq 1) {
-                    Write-Host " ENABLED (via Machine Policy)" -ForegroundColor Green
-                    return $true
-                } else {
+        # Step 1: Remove User Group Policy lock (if present)
+        if (Test-Path $PolicyPath) {
+            $checkPolicy = Get-ItemProperty -Path $PolicyPath -Name $PolicyName -ErrorAction SilentlyContinue
+            if ($checkPolicy) {
+                try {
+                    Remove-ItemProperty -Path $PolicyPath -Name $PolicyName -ErrorAction Stop
+                } catch {
                     Write-Host " FAILED" -ForegroundColor Red
-                    Write-Host "    ⚠️  Machine Group Policy may be enforced by domain administrator" -ForegroundColor Yellow
+                    Write-Host "    ⚠️  Could not remove User Group Policy lock" -ForegroundColor Yellow
                     return $false
                 }
+            }
+        }
+
+        # Step 2: Set User Preference to ON
+        if (-not (Test-Path $PrefPath)) {
+            try {
+                New-Item -Path $PrefPath -Force | Out-Null
             } catch {
                 Write-Host " FAILED" -ForegroundColor Red
-                Write-Host "    ⚠️  Cannot modify Machine Group Policy (requires admin rights)" -ForegroundColor Yellow
+                Write-Host "    ⚠️  Failed to create registry key" -ForegroundColor Yellow
                 return $false
             }
         }
 
-        # Check if controlled by User Group Policy
-        $userPolicyVal = Get-ItemProperty -Path $RegPath_UserPolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
-        if ($null -ne $userPolicyVal) {
-            # Try to set user policy
-            try {
-                Set-ItemProperty -Path $RegPath_UserPolicy -Name "SmartScreenEnabled" -Value 1 -ErrorAction Stop
-                Start-Sleep -Seconds 1
-
-                # Verify
-                $newValue = Get-ItemProperty -Path $RegPath_UserPolicy -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
-                if ($newValue.SmartScreenEnabled -eq 1) {
-                    Write-Host " ENABLED (via User Policy)" -ForegroundColor Green
-                    return $true
-                } else {
-                    Write-Host " FAILED" -ForegroundColor Red
-                    Write-Host "    ⚠️  User Group Policy may be enforced" -ForegroundColor Yellow
-                    return $false
-                }
-            } catch {
-                Write-Host " FAILED" -ForegroundColor Red
-                Write-Host "    ⚠️  Cannot modify User Group Policy" -ForegroundColor Yellow
-                return $false
-            }
-        }
-
-        # No policy set - use user personal setting
+        # Set the "(default)" value of this key to 1
         try {
-            if (-not (Test-Path $RegPath_UserSetting)) {
-                New-Item -Path $RegPath_UserSetting -Force | Out-Null
-            }
-
-            Set-ItemProperty -Path $RegPath_UserSetting -Name "SmartScreenEnabled" -Value 1 -ErrorAction Stop
-
-            Start-Sleep -Seconds 1
-
-            # Verify
-            $newValue = Get-ItemProperty -Path $RegPath_UserSetting -Name "SmartScreenEnabled" -ErrorAction SilentlyContinue
-            if ($newValue.SmartScreenEnabled -eq 1) {
-                Write-Host " ENABLED" -ForegroundColor Green
-                return $true
-            } else {
-                Write-Host " FAILED" -ForegroundColor Red
-                Write-Host "    ⚠️  Setting was not applied" -ForegroundColor Yellow
-                return $false
-            }
+            Set-ItemProperty -Path $PrefPath -Name "(default)" -Value 1 -Type DWord -Force
         } catch {
             Write-Host " FAILED" -ForegroundColor Red
-            Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "    ⚠️  Failed to set preference: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        Start-Sleep -Seconds 1
+
+        # Step 3: Verification
+        $verify = Get-ItemProperty -Path $PrefPath -Name "(default)" -ErrorAction SilentlyContinue
+        if ($verify.'(default)' -eq 1) {
+            Write-Host " ENABLED" -ForegroundColor Green
+            Write-Host "    ℹ️  Restart Microsoft Edge to apply changes" -ForegroundColor Cyan
+            return $true
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Verification failed" -ForegroundColor Yellow
             return $false
         }
 
