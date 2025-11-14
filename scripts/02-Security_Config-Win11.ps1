@@ -1942,6 +1942,99 @@ function Enable-SmartScreenEdge {
     }
 }
 
+function Enable-PUAProtection {
+    <#
+    .SYNOPSIS
+        Enables Potentially Unwanted App (PUA) Protection
+    .DESCRIPTION
+        Enables PUA blocking for both apps and downloads.
+        Removes Group Policy management to restore user control.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Block potentially unwanted apps..." -ForegroundColor Cyan -NoNewline
+
+        # --- From 'Enable_PUA-W11.ps1' ---
+        $GroupPolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender"
+        $GroupPolicyValue = "PUAProtection"
+        $EdgePath = "HKCU:\SOFTWARE\Microsoft\Edge\SmartScreenPuaEnabled"
+
+        # Check if Windows Defender is available
+        $defenderService = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+        if ($null -eq $defenderService) {
+            Write-Host " NOT AVAILABLE" -ForegroundColor DarkGray
+            Write-Host "    ℹ️  Windows Defender service not found (third-party AV may be active)" -ForegroundColor Cyan
+            return $false
+        }
+
+        if ($defenderService.Status -ne 'Running') {
+            Write-Host " NOT AVAILABLE" -ForegroundColor DarkGray
+            Write-Host "    ℹ️  Windows Defender service not running (Status: $($defenderService.Status))" -ForegroundColor Cyan
+            return $false
+        }
+
+        # Step 1: Remove Group Policy management (if present)
+        if (Test-Path $GroupPolicyPath) {
+            $gpValue = Get-ItemProperty -Path $GroupPolicyPath -Name $GroupPolicyValue -ErrorAction SilentlyContinue
+            if ($null -ne $gpValue) {
+                try {
+                    Remove-ItemProperty -Path $GroupPolicyPath -Name $GroupPolicyValue -Force -ErrorAction Stop
+                } catch {
+                    Write-Host " FAILED" -ForegroundColor Red
+                    Write-Host "    ⚠️  Could not remove Group Policy lock (requires admin rights)" -ForegroundColor Yellow
+                    return $false
+                }
+            }
+        }
+
+        # Step 2: Enable PUA Protection via Windows Defender
+        try {
+            Set-MpPreference -PUAProtection Enabled -ErrorAction Stop
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Failed to enable PUA Protection: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        Start-Sleep -Seconds 1
+
+        # Step 3: Verify Windows Defender setting
+        try {
+            $mpPref = Get-MpPreference -ErrorAction Stop
+            if ($mpPref.PUAProtection -ne 1) {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  PUA Protection value: $($mpPref.PUAProtection) (expected: 1)" -ForegroundColor Yellow
+                return $false
+            }
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Could not verify setting: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        # Step 4: Enable Edge PUA blocking (Block downloads)
+        try {
+            if (-not (Test-Path $EdgePath)) {
+                New-Item -Path "HKCU:\SOFTWARE\Microsoft\Edge" -Name "SmartScreenPuaEnabled" -Force | Out-Null
+            }
+            Set-ItemProperty -Path $EdgePath -Name "(Default)" -Value 1 -Type DWord -Force
+        } catch {
+            # Edge blocking is optional, don't fail if this doesn't work
+        }
+
+        Write-Host " ENABLED" -ForegroundColor Green
+        Write-Host "    ✓ Block apps: Enabled" -ForegroundColor Green
+        Write-Host "    ✓ Block downloads: Enabled" -ForegroundColor Green
+        return $true
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Enable-SmartAppControl {
     <#
     .SYNOPSIS
@@ -2056,6 +2149,14 @@ function Apply-SecuritySettings {
 
             "Smart App Control" {
                 if (Enable-SmartAppControl) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Block potentially unwanted apps" {
+                if (Enable-PUAProtection) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
