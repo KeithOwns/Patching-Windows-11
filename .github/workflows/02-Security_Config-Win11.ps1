@@ -1714,6 +1714,84 @@ function Enable-ControlledFolderAccess {
     }
 }
 
+function Enable-CheckAppsAndFiles {
+    <#
+    .SYNOPSIS
+        Enables SmartScreen for checking apps and files
+    .DESCRIPTION
+        Enables Windows SmartScreen to check apps and files downloaded from the internet.
+        Checks Group Policy and local settings.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Check apps and files (SmartScreen)..." -ForegroundColor Cyan -NoNewline
+
+        $policyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
+        $policyProperty = "EnableSmartScreen"
+        $userPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer"
+        $userProperty = "SmartScreenEnabled"
+
+        # Check if controlled by Group Policy
+        $policyValue = Get-ItemProperty -Path $policyPath -Name $policyProperty -ErrorAction SilentlyContinue
+
+        if ($null -ne $policyValue) {
+            # Controlled by Group Policy - try to set it
+            try {
+                Set-ItemProperty -Path $policyPath -Name $policyProperty -Value 1 -ErrorAction Stop
+
+                Start-Sleep -Seconds 1
+
+                # Verify
+                $newValue = Get-ItemProperty -Path $policyPath -Name $policyProperty -ErrorAction SilentlyContinue
+                if ($newValue.$policyProperty -eq 1) {
+                    Write-Host " ENABLED (via Group Policy)" -ForegroundColor Green
+                    return $true
+                } else {
+                    Write-Host " FAILED" -ForegroundColor Red
+                    Write-Host "    ⚠️  Group Policy may be enforced by domain administrator" -ForegroundColor Yellow
+                    return $false
+                }
+            } catch {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Cannot modify Group Policy setting (may require domain admin)" -ForegroundColor Yellow
+                return $false
+            }
+        } else {
+            # Local setting - set to "Warn"
+            try {
+                if (-not (Test-Path $userPath)) {
+                    New-Item -Path $userPath -Force | Out-Null
+                }
+
+                Set-ItemProperty -Path $userPath -Name $userProperty -Value "Warn" -ErrorAction Stop
+
+                Start-Sleep -Seconds 1
+
+                # Verify
+                $newValue = Get-ItemProperty -Path $userPath -Name $userProperty -ErrorAction SilentlyContinue
+                if ($newValue.$userProperty -ne "Off") {
+                    Write-Host " ENABLED" -ForegroundColor Green
+                    return $true
+                } else {
+                    Write-Host " FAILED" -ForegroundColor Red
+                    Write-Host "    ⚠️  Setting was not applied" -ForegroundColor Yellow
+                    return $false
+                }
+            } catch {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+                return $false
+            }
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Apply-SecuritySettings {
     <#
     .SYNOPSIS
@@ -1747,6 +1825,14 @@ function Apply-SecuritySettings {
 
             "Controlled folder access" {
                 if (Enable-ControlledFolderAccess) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Check apps and files" {
+                if (Enable-CheckAppsAndFiles) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
