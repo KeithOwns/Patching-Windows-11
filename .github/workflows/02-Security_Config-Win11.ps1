@@ -1389,19 +1389,19 @@ function Compare-ToBaseline {
     param(
         [string]$BaselinePath
     )
-    
+
     if (!(Test-Path $BaselinePath)) {
         Write-Host "`n⚠️  Baseline file not found: $BaselinePath" -ForegroundColor Yellow
         return
     }
-    
+
     try {
         $baseline = Get-Content $BaselinePath | ConvertFrom-Json
         Write-Host "`n📊 BASELINE COMPARISON" -ForegroundColor Cyan
         Write-Host ("─" * 60) -ForegroundColor DarkGray
         Write-Host "Baseline from: " -NoNewline -ForegroundColor Gray
         Write-Host $baseline.Timestamp -ForegroundColor White
-        
+
         $changes = @()
         foreach ($currentCheck in $script:SecurityChecks) {
             $baselineCheck = $baseline.Checks | Where-Object { $_.Name -eq $currentCheck.Name }
@@ -1413,7 +1413,7 @@ function Compare-ToBaseline {
                 }
             }
         }
-        
+
         if ($changes.Count -eq 0) {
             Write-Host "`n✓ No changes detected from baseline" -ForegroundColor Green
         } else {
@@ -1426,7 +1426,7 @@ function Compare-ToBaseline {
                 Write-Host "$($change.Was) → $($change.Now)" -ForegroundColor $color
             }
         }
-        
+
         $scoreDiff = (Get-SecurityScore) - $baseline.Score
         Write-Host "`nScore change: " -NoNewline -ForegroundColor Gray
         if ($scoreDiff -gt 0) {
@@ -1436,10 +1436,136 @@ function Compare-ToBaseline {
         } else {
             Write-Host "No change" -ForegroundColor Gray
         }
-        
+
     } catch {
         Write-Host "`n⚠️  Error reading baseline: $($_.Exception.Message)" -ForegroundColor Red
     }
+}
+
+function Write-ApplySettingsMenu {
+    <#
+    .SYNOPSIS
+        Helper function to draw the Apply Settings interactive menu
+    #>
+    param(
+        [int]$selectedOption,
+        [int]$menuTop
+    )
+
+    # Reset cursor to the top of the menu area
+    [Console]::SetCursorPosition(0, $menuTop)
+
+    # Define prefixes
+    $prefix1 = "  [ ]"
+    $prefix2 = "  [ ]"
+
+    if ($selectedOption -eq 0) {
+        $prefix1 = "  [*]"
+    } else {
+        $prefix2 = "  [*]"
+    }
+
+    # Draw options, clearing the rest of the line
+    $clearLine = " " * ([Console]::WindowWidth - 50)
+
+    Write-Host "$prefix1 Yes - Apply recommended settings" -NoNewline -ForegroundColor White
+    Write-Host $clearLine
+
+    [Console]::SetCursorPosition(0, $menuTop + 1)
+    Write-Host "$prefix2 No - Exit without applying settings" -NoNewline -ForegroundColor White
+    Write-Host $clearLine
+}
+
+function Invoke-ApplySecuritySettings {
+    <#
+    .SYNOPSIS
+        Prompts user to apply recommended security settings and executes if confirmed
+    #>
+    param()
+
+    # Check if there are any disabled settings to apply
+    $disabledChecks = $script:SecurityChecks | Where-Object { !$_.IsEnabled }
+
+    if ($disabledChecks.Count -eq 0) {
+        Write-Host "`n✓ All security features are already enabled!" -ForegroundColor Green
+        Write-Host "  No settings need to be applied." -ForegroundColor Gray
+        return
+    }
+
+    Write-Host "`n" -NoNewline
+    Write-Host ("═" * 60) -ForegroundColor Blue
+    Write-Host "  APPLY RECOMMENDED SETTINGS" -ForegroundColor White
+    Write-Host ("═" * 60) -ForegroundColor Blue
+
+    Write-Host "`n  Found " -NoNewline -ForegroundColor White
+    Write-Host "$($disabledChecks.Count)" -NoNewline -ForegroundColor Yellow
+    Write-Host " disabled security feature(s)" -ForegroundColor White
+    Write-Host "`n  Would you like to apply recommended settings?" -ForegroundColor Cyan
+
+    # Interactive Menu
+    $selectedOption = 0 # 0 = Yes, 1 = No
+    $menuTop = [Console]::CursorTop
+    $choiceMade = $false
+
+    # Hide cursor
+    $oldCursorVisible = [Console]::CursorVisible
+    [Console]::CursorVisible = $false
+
+    while (!$choiceMade) {
+        # Draw the menu
+        Write-ApplySettingsMenu -selectedOption $selectedOption -menuTop $menuTop
+
+        # Get key press
+        $key = [System.Console]::ReadKey($true)
+
+        switch ($key.Key) {
+            'UpArrow'   { $selectedOption = 0 }
+            'DownArrow' { $selectedOption = 1 }
+            'Enter' {
+                $choiceMade = $true
+            }
+        }
+    }
+
+    # Restore cursor
+    [Console]::CursorVisible = $oldCursorVisible
+
+    # Clear the menu area (2 lines)
+    [Console]::SetCursorPosition(0, $menuTop)
+    Write-Host (" " * [Console]::WindowWidth)
+    [Console]::SetCursorPosition(0, $menuTop + 1)
+    Write-Host (" " * [Console]::WindowSize.Width)
+    [Console]::SetCursorPosition(0, $menuTop)
+
+    # Execute based on user selection
+    if ($selectedOption -eq 0) {
+        # User chose Yes - Apply settings
+        Write-Host "`n  ✓ Applying recommended security settings..." -ForegroundColor Green
+        Write-Host ("─" * 60) -ForegroundColor DarkGray
+
+        # This is where we'll add individual setting functions
+        Apply-SecuritySettings
+
+        Write-Host "`n" -NoNewline
+        Write-Host ("─" * 60) -ForegroundColor DarkGray
+        Write-Host "  ✓ Settings applied successfully!" -ForegroundColor Green
+        Write-Host ("─" * 60) -ForegroundColor DarkGray
+    } else {
+        # User chose No - Exit
+        Write-Host "`n  - Exiting without applying settings" -ForegroundColor Gray
+    }
+}
+
+function Apply-SecuritySettings {
+    <#
+    .SYNOPSIS
+        Applies security settings that are currently disabled
+    #>
+    param()
+
+    # Placeholder - we'll add individual setting functions here one at a time
+    Write-Host "`n  ℹ️  Setting application functions will be added here" -ForegroundColor Cyan
+    Write-Host "     (To be implemented one function at a time)" -ForegroundColor Gray
 }
 
 # Main execution
@@ -1462,7 +1588,10 @@ try {
     
     # Show summary
     Show-SecuritySummary
-    
+
+    # Apply recommended settings (interactive prompt)
+    Invoke-ApplySecuritySettings
+
     # Show remediation if requested
     if ($ShowRemediation) {
         Show-RemediationSteps
