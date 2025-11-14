@@ -1792,6 +1792,50 @@ function Enable-CheckAppsAndFiles {
     }
 }
 
+function Enable-SmartScreenEdge {
+    <#
+    .SYNOPSIS
+        Enables SmartScreen for Microsoft Edge
+    .DESCRIPTION
+        Enables SmartScreen protection in Microsoft Edge browser.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • SmartScreen for Microsoft Edge..." -ForegroundColor Cyan -NoNewline
+
+        $edgePath = "HKCU:\Software\Microsoft\Edge\SmartScreen"
+        $edgeProperty = "Enabled"
+
+        # Create registry path if it doesn't exist
+        if (-not (Test-Path $edgePath)) {
+            New-Item -Path $edgePath -Force | Out-Null
+        }
+
+        # Set SmartScreen to enabled (1)
+        Set-ItemProperty -Path $edgePath -Name $edgeProperty -Value 1 -ErrorAction Stop
+
+        Start-Sleep -Seconds 1
+
+        # Verify the setting
+        $newValue = Get-ItemProperty -Path $edgePath -Name $edgeProperty -ErrorAction SilentlyContinue
+
+        if ($newValue.$edgeProperty -ne 0) {
+            Write-Host " ENABLED" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Setting was not applied" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Apply-SecuritySettings {
     <#
     .SYNOPSIS
@@ -1833,6 +1877,14 @@ function Apply-SecuritySettings {
 
             "Check apps and files" {
                 if (Enable-CheckAppsAndFiles) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "SmartScreen for Microsoft Edge" {
+                if (Enable-SmartScreenEdge) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
