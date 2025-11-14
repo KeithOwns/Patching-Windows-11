@@ -2193,6 +2193,93 @@ function Enable-MemoryIntegrity {
     }
 }
 
+function Enable-KernelStackProtection {
+    <#
+    .SYNOPSIS
+        Enables Kernel-mode Hardware-enforced Stack Protection
+    .DESCRIPTION
+        Enables Kernel Stack Protection through registry settings.
+        Sets WasEnabledBy = 2 to allow user control via Windows Security GUI.
+        Requires a system restart to take effect.
+        Requires compatible CPU with hardware stack protection support (Intel CET or AMD Shadow Stack).
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Kernel-mode Hardware-enforced Stack Protection..." -ForegroundColor Cyan -NoNewline
+
+        # --- From 'Enable_KernelStackProtection.ps1' ---
+        $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\KernelShadowStacks"
+
+        # Check Windows version compatibility - requires Windows 11 22H2 (build 22621+)
+        $osVersion = [System.Environment]::OSVersion.Version
+        $buildNumber = $osVersion.Build
+
+        if ($osVersion.Major -lt 10 -or $buildNumber -lt 22621) {
+            Write-Host " NOT SUPPORTED" -ForegroundColor DarkGray
+            Write-Host "    ℹ️  Requires Windows 11 build 22621 (22H2) or later" -ForegroundColor Cyan
+            return $false
+        }
+
+        # Create registry path if it doesn't exist
+        if (-not (Test-Path $registryPath)) {
+            try {
+                New-Item -Path $registryPath -Force | Out-Null
+            } catch {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Failed to create registry path (requires admin rights)" -ForegroundColor Yellow
+                return $false
+            }
+        }
+
+        # Set Enabled = 1
+        try {
+            Set-ItemProperty -Path $registryPath -Name "Enabled" -Value 1 -Type DWord -Force
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Failed to set Enabled value: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        # Set WasEnabledBy = 2 (allows user control, prevents "managed by administrator" message)
+        try {
+            Set-ItemProperty -Path $registryPath -Name "WasEnabledBy" -Value 2 -Type DWord -Force
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Failed to set WasEnabledBy value: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+        Start-Sleep -Seconds 1
+
+        # Verify the changes
+        try {
+            $enabledValue = (Get-ItemProperty -Path $registryPath -Name "Enabled" -ErrorAction Stop).Enabled
+            $wasEnabledByValue = (Get-ItemProperty -Path $registryPath -Name "WasEnabledBy" -ErrorAction Stop).WasEnabledBy
+
+            if ($enabledValue -eq 1 -and $wasEnabledByValue -eq 2) {
+                Write-Host " ENABLED" -ForegroundColor Green
+                Write-Host "    ⚠️  RESTART REQUIRED for changes to take effect" -ForegroundColor Yellow
+                Write-Host "    ℹ️  Requires CPU with Intel CET or AMD Shadow Stack support" -ForegroundColor Cyan
+                return $true
+            } else {
+                Write-Host " FAILED" -ForegroundColor Red
+                Write-Host "    ⚠️  Verification failed (Enabled: $enabledValue, WasEnabledBy: $wasEnabledByValue)" -ForegroundColor Yellow
+                return $false
+            }
+        } catch {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  Verification failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Enable-SmartAppControl {
     <#
     .SYNOPSIS
@@ -2331,6 +2418,14 @@ function Apply-SecuritySettings {
 
             "Memory integrity" {
                 if (Enable-MemoryIntegrity) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Kernel-mode Hardware-enforced Stack Protection" {
+                if (Enable-KernelStackProtection) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
