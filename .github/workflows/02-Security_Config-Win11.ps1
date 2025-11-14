@@ -1608,6 +1608,65 @@ function Enable-RealTimeProtection {
     }
 }
 
+function Enable-TamperProtection {
+    <#
+    .SYNOPSIS
+        Guides user to enable Tamper Protection via Windows Security UI
+    .DESCRIPTION
+        Tamper Protection cannot be enabled programmatically (by design).
+        Opens Windows Security and provides instructions for manual enablement.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Tamper protection..." -ForegroundColor Cyan -NoNewline
+
+        # Check current status
+        $tamperValue = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features" -Name "TamperProtection" -ErrorAction SilentlyContinue
+
+        if ($tamperValue.TamperProtection -eq 1 -or $tamperValue.TamperProtection -eq 5) {
+            Write-Host " ALREADY ENABLED" -ForegroundColor Green
+            return $true
+        }
+
+        Write-Host " NEEDS MANUAL ENABLEMENT" -ForegroundColor Yellow
+        Write-Host "`n    Opening Windows Security..." -ForegroundColor Cyan
+
+        # Open Windows Security to Virus & threat protection settings
+        Start-Process "windowsdefender://threatsettings" -ErrorAction Stop
+
+        Start-Sleep -Seconds 2
+
+        Write-Host "`n    ℹ️  Tamper Protection must be enabled manually:" -ForegroundColor Cyan
+        Write-Host "      1. In the Windows Security window that opened:" -ForegroundColor White
+        Write-Host "      2. Scroll down to 'Tamper Protection'" -ForegroundColor White
+        Write-Host "      3. Toggle it ON" -ForegroundColor White
+        Write-Host "      4. Close Windows Security when done" -ForegroundColor White
+        Write-Host "`n    Press any key once you've enabled Tamper Protection..." -ForegroundColor Yellow
+
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+
+        # Verify if user enabled it
+        Start-Sleep -Seconds 1
+        $newValue = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features" -Name "TamperProtection" -ErrorAction SilentlyContinue
+
+        if ($newValue.TamperProtection -eq 1 -or $newValue.TamperProtection -eq 5) {
+            Write-Host "`n    ✓ Tamper Protection is now enabled!" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host "`n    ⚠️  Tamper Protection still appears disabled" -ForegroundColor Yellow
+            Write-Host "      Please enable it manually when ready" -ForegroundColor Gray
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "    Please enable Tamper Protection manually via Windows Security" -ForegroundColor Gray
+        return $false
+    }
+}
+
 function Apply-SecuritySettings {
     <#
     .SYNOPSIS
@@ -1625,6 +1684,14 @@ function Apply-SecuritySettings {
         switch ($check.Name) {
             "Real-time protection" {
                 if (Enable-RealTimeProtection) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Tamper protection" {
+                if (Enable-TamperProtection) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
