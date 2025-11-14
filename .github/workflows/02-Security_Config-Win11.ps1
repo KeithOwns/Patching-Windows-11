@@ -1556,6 +1556,58 @@ function Invoke-ApplySecuritySettings {
     }
 }
 
+function Enable-RealTimeProtection {
+    <#
+    .SYNOPSIS
+        Enables Real-time Protection with Tamper Protection check
+    .DESCRIPTION
+        Checks for Tamper Protection and attempts to enable Real-time protection.
+        Provides guidance if Tamper Protection is blocking the change.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Real-time protection..." -ForegroundColor Cyan -NoNewline
+
+        # Check Tamper Protection via registry
+        $tamperProtection = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features" -Name "TamperProtection" -ErrorAction SilentlyContinue
+
+        if ($tamperProtection.TamperProtection -eq 5) {
+            Write-Host " BLOCKED" -ForegroundColor Red
+            Write-Host "    ⚠️  Tamper Protection is ENABLED and blocking changes." -ForegroundColor Yellow
+            Write-Host "    To enable Real-time Protection:" -ForegroundColor Gray
+            Write-Host "      1. Open Windows Security" -ForegroundColor Gray
+            Write-Host "      2. Go to: Virus & threat protection > Manage settings" -ForegroundColor Gray
+            Write-Host "      3. Turn OFF 'Tamper Protection' temporarily" -ForegroundColor Gray
+            Write-Host "      4. Run this script again" -ForegroundColor Gray
+            Write-Host "      5. Re-enable Tamper Protection afterwards" -ForegroundColor Gray
+            return $false
+        }
+
+        # Enable Real-time Protection
+        Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop
+
+        Start-Sleep -Seconds 1
+
+        # Verify the setting
+        $status = Get-MpPreference | Select-Object -ExpandProperty DisableRealtimeMonitoring
+
+        if ($status -eq $false) {
+            Write-Host " ENABLED" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  May be blocked by Group Policy or other restrictions" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Apply-SecuritySettings {
     <#
     .SYNOPSIS
@@ -1563,9 +1615,39 @@ function Apply-SecuritySettings {
     #>
     param()
 
-    # Placeholder - we'll add individual setting functions here one at a time
-    Write-Host "`n  ℹ️  Setting application functions will be added here" -ForegroundColor Cyan
-    Write-Host "     (To be implemented one function at a time)" -ForegroundColor Gray
+    $settingsApplied = 0
+    $settingsFailed = 0
+
+    # Check each disabled setting and apply if possible
+    $disabledChecks = $script:SecurityChecks | Where-Object { !$_.IsEnabled }
+
+    foreach ($check in $disabledChecks) {
+        switch ($check.Name) {
+            "Real-time protection" {
+                if (Enable-RealTimeProtection) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            default {
+                # Setting not yet implemented
+                Write-Host "`n  ℹ️  $($check.Name): Not yet implemented" -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    # Summary
+    if ($settingsApplied -gt 0 -or $settingsFailed -gt 0) {
+        Write-Host "`n  Summary:" -ForegroundColor Cyan
+        if ($settingsApplied -gt 0) {
+            Write-Host "    ✓ $settingsApplied setting(s) applied successfully" -ForegroundColor Green
+        }
+        if ($settingsFailed -gt 0) {
+            Write-Host "    ✗ $settingsFailed setting(s) failed to apply" -ForegroundColor Yellow
+        }
+    }
 }
 
 # Main execution
@@ -1628,7 +1710,7 @@ try {
     # Removed: Display scan time
     
     # Set the timestamp this script was last edited
-    $lastEditedTimestamp = "2025-11-12"
+    $lastEditedTimestamp = "2025-11-14"
     Write-Host "  Last Edited: $lastEditedTimestamp" -ForegroundColor Green
     Write-Host "  www.AIIT.support All rights reserved" -ForegroundColor Green
     Write-Host ("─" * 60) -ForegroundColor DarkGray
