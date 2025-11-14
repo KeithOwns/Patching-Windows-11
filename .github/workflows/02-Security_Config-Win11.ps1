@@ -1836,6 +1836,63 @@ function Enable-SmartScreenEdge {
     }
 }
 
+function Enable-SmartAppControl {
+    <#
+    .SYNOPSIS
+        Attempts to enable Smart App Control (Windows 11 22H2+)
+
+    .DESCRIPTION
+        Smart App Control can only be enabled on a clean install or requires factory reset.
+        Once turned off, it cannot be programmatically re-enabled.
+        This function informs the user of this limitation.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Smart App Control..." -ForegroundColor Cyan -NoNewline
+
+        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy"
+        $regName = "VerifiedAndReputablePolicyState"
+
+        # Check current status
+        if (Test-Path $regPath) {
+            $regItem = Get-ItemProperty -Path $regPath -Name $regName -ErrorAction SilentlyContinue
+
+            if ($regItem -and $regItem.$regName -ne $null) {
+                $currentValue = $regItem.$regName
+
+                if ($currentValue -eq 1) {
+                    Write-Host " ALREADY ENABLED" -ForegroundColor Green
+                    return $true
+                }
+                elseif ($currentValue -eq 2) {
+                    Write-Host " EVALUATION MODE" -ForegroundColor Yellow
+                    Write-Host "    ℹ️  Smart App Control is in Evaluation Mode" -ForegroundColor Cyan
+                    return $true
+                }
+                else {
+                    # Value is 0 (Off) or other
+                    Write-Host " CANNOT ENABLE" -ForegroundColor Yellow
+                    Write-Host "`n    ⚠️  Smart App Control cannot be re-enabled once turned off" -ForegroundColor Yellow
+                    Write-Host "    ℹ️  This requires a clean Windows installation or factory reset" -ForegroundColor Cyan
+                    Write-Host "    ℹ️  This is by design to prevent malware from toggling it" -ForegroundColor Cyan
+                    return $false
+                }
+            }
+        }
+
+        # Registry path doesn't exist or value is missing
+        Write-Host " NOT SUPPORTED" -ForegroundColor DarkGray
+        Write-Host "    ℹ️  Smart App Control requires Windows 11 22H2 or later" -ForegroundColor Cyan
+        return $false
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Apply-SecuritySettings {
     <#
     .SYNOPSIS
@@ -1885,6 +1942,14 @@ function Apply-SecuritySettings {
 
             "SmartScreen for Microsoft Edge" {
                 if (Enable-SmartScreenEdge) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Smart App Control" {
+                if (Enable-SmartAppControl) {
                     $settingsApplied++
                 } else {
                     $settingsFailed++
