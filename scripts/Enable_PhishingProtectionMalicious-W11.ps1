@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 # Enable "Warn me about malicious apps and sites" in Phishing Protection
 # Windows Security > Reputation-based protection
 

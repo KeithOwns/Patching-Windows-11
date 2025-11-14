@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 <#
 .SYNOPSIS
   Configures Windows Storage Sense settings at the user level.

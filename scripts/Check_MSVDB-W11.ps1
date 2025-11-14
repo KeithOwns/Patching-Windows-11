@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 # This script must be run as Administrator to read the HKLM registry hive.
 
 $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config"

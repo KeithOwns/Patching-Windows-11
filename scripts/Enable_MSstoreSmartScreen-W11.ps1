@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 # File: Configure-StoreSmartScreen-User.ps1
 # Purpose: Configure SmartScreen for Microsoft Store apps for the current user (HKCU).
 # Requires: PowerShell 5.1+

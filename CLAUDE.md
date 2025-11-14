@@ -27,50 +27,46 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 cd scripts
 
 # Run security check (read-only)
-.\SecurityCheckONLY-W11.ps1
+.\Check_SecurityOnly-W11.ps1
 
 # Run security check with remediation options
-.\02-Security_Config-Win11.ps1 -ShowRemediation
+.\Check_SecurityComprehensive-W11.ps1 -ShowRemediation
 
 # Export security report
-.\02-Security_Config-Win11.ps1 -ExportHtml -OutputPath "C:\Reports"
-
-# Test application installer
-.\04-Install_Apps-agron.ps1 -DeviceType Auto
+.\Check_SecurityComprehensive-W11.ps1 -ExportHtml -OutputPath "C:\Reports"
 ```
 
 ### Full System Hardening Workflow
 
 ```powershell
 # Recommended execution order:
-.\CreateRestorePoint_Win11.ps1                    # 1. Safety first
-.\01-Update_Config-Win11.ps1                      # 2. Configure updates
-.\02-Security_Config-Win11.ps1                    # 3. Security audit + remediation
-.\04-Install_Apps-agron.ps1 -DeviceType Auto      # 4. Install required software
-.\05-Finalize_Maintenance-Win11.ps1               # 5. Final optimization
+.\Create_RestorePoint-W11.ps1                     # 1. Safety first
+.\Configure_Updates-W11.ps1                       # 2. Configure updates
+.\Check_SecurityComprehensive-W11.ps1             # 3. Security audit + remediation
+.\Run_Maintenance-W11.ps1                         # 4. Final optimization
 ```
 
 ## Architecture & Code Organization
 
 ### Script Categories
 
-**Orchestration Scripts (Numbered Sequence):**
-- `01-Update_Config-Win11.ps1` - Windows/Store update configuration & automation
-- `02-Security_Config-Win11.ps1` - Security assessment with scoring and interactive remediation
-- `04-Install_Apps-agron.ps1` - Application deployment with device-type detection
-- `05-Finalize_Maintenance-Win11.ps1` - System optimization, cleanup, and diagnostics
+**Orchestration Scripts:**
+- `Configure_Updates-W11.ps1` - Windows/Store update configuration & automation
+- `Check_SecurityComprehensive-W11.ps1` - Security assessment with scoring and interactive remediation
+- `Run_Maintenance-W11.ps1` - System optimization, cleanup, and diagnostics
 
 **Check Scripts (Check_*.ps1):**
 - Read-only status verification for specific features
-- Examples: `Check_forDevDrive-W11.ps1`, `Check_SmartAppControl-W11.ps1`
+- Examples: `Check_DevDrive-W11.ps1`, `Check_SmartAppControl-W11.ps1`, `Check_SecurityOnly-W11.ps1`
 
-**Enable Scripts (Enable_*.ps1):**
-- Apply specific security settings
-- Examples: `Enable_RealTimeProc.ps1`, `Enable_LSA-W11.ps1`, `Enable_MemoryIntegrity.ps1`
+**Enable Scripts (Enable_*.ps1) / Disable Scripts (Disable_*.ps1):**
+- Apply or remove specific security settings
+- Examples: `Enable_RealTimeProtection-W11.ps1`, `Enable_LSA-W11.ps1`, `Disable_PUA-W11.ps1`
 
 **Support Scripts:**
-- `CreateRestorePoint_Win11.ps1` - System restore point creator
-- `SecurityCheckONLY-W11.ps1` - Read-only security audit
+- `Create_RestorePoint-W11.ps1` - System restore point creator
+- `Check_SecurityOnly-W11.ps1` - Read-only security audit
+- `Test-ScriptQuality.ps1` - Script quality validation tool
 - `MAINTENANCEruns.bat` - Legacy maintenance batch script
 
 ### Shared Utility Framework
@@ -109,7 +105,7 @@ Scripts understand feature dependencies and check them before applying changes:
 - **Tamper Protection** blocks programmatic security changes (user must disable manually)
 - **Third-party AV detection** skips Windows Defender checks when non-Microsoft AV is active
 
-### 2. The Apply Settings Module (02-Security_Config-Win11.ps1)
+### 2. The Apply Settings Module (Check_SecurityComprehensive-W11.ps1)
 
 The main security script has an integrated "Apply Settings" module with individual setters:
 - Each setter is a self-contained function targeting one security feature
@@ -136,11 +132,21 @@ $button = $element.FindFirst($TreeScope, $condition)
 $button.GetCurrentPattern($InvokePattern).Invoke()
 ```
 
-Used in: `01-Update_Config-Win11.ps1`, `CHECK_MSstore-Updates.ps1`, `Check_WinUpdates-W11.ps1`
+Used in: `Configure_Updates-W11.ps1`, `Check_MSstoreUpdates-W11.ps1`, `Check_WinUpdates-W11.ps1`
 
-### 4. Application Installation Pattern (04-Install_Apps-agron.ps1)
+### 4. Naming Convention
 
-Three installation methods with fallback logic:
+All scripts follow the pattern `[Verb]_[SettingName]-W11.ps1`:
+
+- **Verbs**: Check, Enable, Disable, Configure, Run, Create, Open, Restart
+- **Examples**: `Check_DevDrive-W11.ps1`, `Enable_RealTimeProtection-W11.ps1`, `Disable_PUA-W11.ps1`
+- **Exception**: Test-ScriptQuality.ps1 (uses PowerShell Verb-Noun convention)
+
+### 5. Application Installation Pattern (Removed)
+
+The application installer (`04-Install_Apps-agron.ps1`) has been removed from the repository.
+
+Previous installation methods included:
 
 ```powershell
 # 1. WINGET (preferred) - with scope fallback and retry
@@ -164,7 +170,7 @@ Start-Process -FilePath $exePath -ArgumentList $silentArgs -Wait
 6. Re-enable Controlled Folder Access
 7. Generate summary logs
 
-### 5. Security Scoring System
+### 6. Security Scoring System
 
 Security checks use weighted severity levels:
 
@@ -178,7 +184,7 @@ Rating: EXCELLENT (90+) | GOOD (80+) | FAIR (60+) | POOR (<60)
 
 ## Common Development Tasks
 
-### Adding a New Security Check to 02-Security_Config-Win11.ps1
+### Adding a New Security Check to Check_SecurityComprehensive-W11.ps1
 
 1. Add check function in appropriate section (Virus Protection, Firewall, etc.)
 2. Use the `SecurityCheck` class to store results:
@@ -211,23 +217,19 @@ Rating: EXCELLENT (90+) | GOOD (80+) | FAIR (60+) | POOR (<60)
 3. Add status verification after applying changes
 4. Use consistent visual feedback (Write-StatusIcon)
 
-### Adding a New Application to 04-Install_Apps-agron.ps1
+### Adding Script Quality Tests
 
-Update the `$appConfigurations` array:
+The `Test-ScriptQuality.ps1` script validates:
 
+- `#Requires -RunAsAdministrator` in all scripts
+- UTF-8 encoding preservation
+- PowerShell syntax errors
+- Best practices (informational)
+
+Run with:
 ```powershell
-@{
-    Name = "App Display Name"
-    Type = "WINGET"  # or MSI, EXE
-    WingetID = "Publisher.AppName"  # For WINGET
-    # OR
-    DownloadUrl = "https://..."  # For MSI/EXE
-    SilentArgs = "/quiet /norestart"  # For MSI/EXE
-    DetectMethod = "File"  # File, Registry, or Appx
-    DetectPath = "C:\Program Files\App\app.exe"  # For File detection
-    InstallOrder = 10  # Lower = installed first
-    DeviceTypes = @("Desktop", "Laptop")  # Or just @("Laptop")
-}
+cd scripts
+.\Test-ScriptQuality.ps1
 ```
 
 ## Important Technical Notes
@@ -258,7 +260,7 @@ Set-MpPreference          # Modify settings (blocked by Tamper Protection)
 Get-MpComputerStatus      # Scan info, signature versions
 ```
 
-### System Diagnostics Cascade (05-Finalize_Maintenance-Win11.ps1)
+### System Diagnostics Cascade (Run_Maintenance-W11.ps1)
 
 Automated repair workflow:
 

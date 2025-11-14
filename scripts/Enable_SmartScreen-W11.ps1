@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 <#
 .SYNOPSIS
     Sets 'SmartScreen for Microsoft Edge' to ON without locking the UI.

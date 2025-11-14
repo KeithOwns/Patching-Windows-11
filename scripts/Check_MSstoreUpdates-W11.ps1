@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 # PowerShell script to open MS Store Downloads page and check for updates
 # Requires Windows 10/11
 

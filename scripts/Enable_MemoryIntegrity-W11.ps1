@@ -1,4 +1,6 @@
 #Requires -Version 5.1
+#Requires -RunAsAdministrator
+
 <#
 .SYNOPSIS
     Enables Memory Integrity (Hypervisor-protected Code Integrity) in Windows Security.

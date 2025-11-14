@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 <#
 .SYNOPSIS
     Detects the enabled/disabled state of 'SmartScreen for Microsoft Edge' in Windows 11.

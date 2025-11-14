@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 <#
 .SYNOPSIS
   A stand-alone script to display an interactive menu

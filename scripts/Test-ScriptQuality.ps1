@@ -41,12 +41,12 @@ function Write-TestResult {
 
     if ($Passed) {
         $script:PassedTests++
-        Write-Host "  ✓ " -ForegroundColor Green -NoNewline
+        Write-Host "  [PASS] " -ForegroundColor Green -NoNewline
         Write-Host $TestName -ForegroundColor Gray
     }
     else {
         $script:FailedTests++
-        Write-Host "  ✗ " -ForegroundColor Red -NoNewline
+        Write-Host "  [FAIL] " -ForegroundColor Red -NoNewline
         Write-Host "$TestName - $Message" -ForegroundColor Yellow
         $script:Issues += [PSCustomObject]@{
             Test    = $TestName
@@ -145,16 +145,16 @@ function Test-CommonBestPractices {
     # These are informational - we'll just count them but not fail
     if (-not $hasStrictMode -and -not $hasErrorActionPref) {
         # Informational only - don't count as failure
-        Write-Host "  ℹ " -ForegroundColor Cyan -NoNewline
+        Write-Host "  [INFO] " -ForegroundColor Cyan -NoNewline
         Write-Host "Best Practices: $fileName - Consider adding Set-StrictMode and `$ErrorActionPreference" -ForegroundColor Gray
     }
 }
 
 # Main execution
 Write-Host ""
-Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host "  PowerShell Script Quality Tests" -ForegroundColor Cyan
-Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Testing scripts in: $ScriptPath" -ForegroundColor Gray
 Write-Host ""
@@ -187,9 +187,9 @@ foreach ($script in $scripts) {
 
 # Summary
 Write-Host ""
-Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host "  Test Summary" -ForegroundColor Cyan
-Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Total Tests  : " -NoNewline
 Write-Host $script:TotalTests -ForegroundColor Cyan
@@ -200,13 +200,13 @@ Write-Host $script:FailedTests -ForegroundColor $(if ($script:FailedTests -eq 0)
 Write-Host ""
 
 if ($script:FailedTests -gt 0) {
-    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "===============================================================================" -ForegroundColor Red
     Write-Host "  Issues Found" -ForegroundColor Red
-    Write-Host "═══════════════════════════════════════════════════════════════" -ForegroundColor Red
+    Write-Host "===============================================================================" -ForegroundColor Red
     Write-Host ""
 
     foreach ($issue in $script:Issues) {
-        Write-Host "  • $($issue.Test)" -ForegroundColor Yellow
+        Write-Host "  - $($issue.Test)" -ForegroundColor Yellow
         Write-Host "    $($issue.Message)" -ForegroundColor Gray
         Write-Host ""
     }
@@ -214,7 +214,7 @@ if ($script:FailedTests -gt 0) {
     exit 1
 }
 else {
-    Write-Host "All tests passed! ✓" -ForegroundColor Green
+    Write-Host "All tests passed!" -ForegroundColor Green
     Write-Host ""
     exit 0
 }

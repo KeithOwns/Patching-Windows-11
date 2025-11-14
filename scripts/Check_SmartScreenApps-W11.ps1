@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 <#
 .SYNOPSIS
   Checks the status of the 'Check apps and files' (SmartScreen) setting

@@ -37,78 +37,87 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 cd scripts
 
 # 1. Create restore point (safety first)
-.\CreateRestorePoint_Win11.ps1
+.\Create_RestorePoint-W11.ps1
 
 # 2. Configure Windows/Store updates
-.\01-Update_Config-Win11.ps1
+.\Configure_Updates-W11.ps1
 
 # 3. Security audit and remediation
-.\02-Security_Config-Win11.ps1
+.\Check_SecurityComprehensive-W11.ps1
 
-# 4. Install required applications
-.\04-Install_Apps-agron.ps1 -DeviceType Auto
-
-# 5. Final optimization and cleanup
-.\05-Finalize_Maintenance-Win11.ps1
+# 4. Final optimization and cleanup
+.\Run_Maintenance-W11.ps1
 ```
 
 ### Individual Tasks
 
 **Security Check (Read-Only):**
 ```powershell
-.\SecurityCheckONLY-W11.ps1
+.\Check_SecurityOnly-W11.ps1
 ```
 
 **Security Check with Remediation:**
 ```powershell
-.\02-Security_Config-Win11.ps1 -ShowRemediation
+.\Check_SecurityComprehensive-W11.ps1 -ShowRemediation
 ```
 
 **Export Security Report:**
 ```powershell
-.\02-Security_Config-Win11.ps1 -ExportHtml -OutputPath "C:\Reports"
+.\Check_SecurityComprehensive-W11.ps1 -ExportHtml -OutputPath "C:\Reports"
 ```
 
 **Enable Specific Features:**
 ```powershell
-.\Enable_RealTimeProc.ps1
+.\Enable_RealTimeProtection-W11.ps1
 .\Enable_LSA-W11.ps1
-.\Enable_MemoryIntegrity.ps1
+.\Enable_MemoryIntegrity-W11.ps1
 ```
 
 ## Main Scripts
 
-### Orchestration Scripts (Numbered Sequence)
+### Orchestration Scripts
 
 | Script | Description |
 |--------|-------------|
-| `01-Update_Config-Win11.ps1` | Configure and automate Windows/Microsoft Store updates |
-| `02-Security_Config-Win11.ps1` | Comprehensive security assessment with interactive remediation |
-| `04-Install_Apps-agron.ps1` | Automated application deployment with device-type detection |
-| `05-Finalize_Maintenance-Win11.ps1` | System optimization, cleanup, and diagnostics |
+| `Configure_Updates-W11.ps1` | Configure and automate Windows/Microsoft Store updates |
+| `Check_SecurityComprehensive-W11.ps1` | Comprehensive security assessment with interactive remediation |
+| `Run_Maintenance-W11.ps1` | System optimization, cleanup, and diagnostics |
 
 ### Check Scripts
 
 Verify specific security feature status (read-only):
-- `Check_forDevDrive-W11.ps1` - Dev Drive protection status
+- `Check_DevDrive-W11.ps1` - Dev Drive protection status
 - `Check_SmartAppControl-W11.ps1` - Smart App Control status
+- `Check_SmartScreenApps-W11.ps1` - SmartScreen for apps and files status
 - `Check_WinUpdates-W11.ps1` - Automate Windows Update check
-- `CHECK_MSstore-Updates.ps1` - Automate Microsoft Store update check
-- `CHECK_MS VDB.ps1` - Microsoft Vulnerable Driver Blocklist status
+- `Check_MSstoreUpdates-W11.ps1` - Automate Microsoft Store update check
+- `Check_MSVDB-W11.ps1` - Microsoft Vulnerable Driver Blocklist status
+- `Check_SecurityOnly-W11.ps1` - Read-only comprehensive security audit
 
 ### Enable Scripts
 
 Apply specific security settings:
-- `Enable_RealTimeProc.ps1` - Enable real-time protection
+- `Enable_RealTimeProtection-W11.ps1` - Enable real-time protection
 - `Enable_LSA-W11.ps1` - Enable LSA protection (requires reboot)
-- `Enable_MemoryIntegrity.ps1` - Enable memory integrity/HVCI
+- `Enable_MemoryIntegrity-W11.ps1` - Enable memory integrity/HVCI
 - `Enable_PUA-W11.ps1` - Enable potentially unwanted app blocking
+- `Enable_PhishingProtection-W11.ps1` - Enable phishing protection
+- `Enable_PhishingProtectionMalicious-W11.ps1` - Enable phishing protection for malicious sites
+- `Enable_MSstoreSmartScreen-W11.ps1` - Enable Microsoft Store SmartScreen
+- `Enable_SmartScreen-W11.ps1` - Enable SmartScreen
 - `Enable_StorageSense-W11.ps1` - Configure storage sense
+
+### Disable Scripts
+
+Disable specific security settings:
+- `Disable_PUA-W11.ps1` - Disable potentially unwanted app blocking
 
 ### Support Scripts
 
-- `CreateRestorePoint_Win11.ps1` - Create system restore point
-- `SecurityCheckONLY-W11.ps1` - Security audit without remediation
+- `Create_RestorePoint-W11.ps1` - Create system restore point
+- `Open_PhishProtect-W11.ps1` - Open phishing protection settings
+- `Restart_WindowsSecurity-W11.ps1` - Restart Windows Security service
+- `Test-ScriptQuality.ps1` - Validate script quality and consistency
 - `MAINTENANCEruns.bat` - Legacy maintenance batch script
 
 ## Security Features Covered
@@ -152,7 +161,7 @@ Apply specific security settings:
 
 ## Security Scoring
 
-The security assessment script (`02-Security_Config-Win11.ps1`) calculates a weighted security score (0-100):
+The security assessment script (`Check_SecurityComprehensive-W11.ps1`) calculates a weighted security score (0-100):
 
 - **Critical** issues (3x weight): Firewall, Real-time Protection, Tamper Protection
 - **Warning** issues (2x weight): Most security features, updates, policies
