@@ -245,7 +245,7 @@ function Get-DefenderStatus {
     #>
     param()
 
-    Write-SectionHeader "Virus & threat protection" "🛡️"
+    Write-SectionHeader "Virus & threat protection settings" "⚙️"
     # Check for third-party antivirus software
     $avInfo = Get-ThirdPartyAntivirus
 
@@ -267,8 +267,7 @@ function Get-DefenderStatus {
     }
 
     # Windows Defender is the primary AV - proceed with normal checks
-    Write-Host "  ℹ️  " -NoNewline -ForegroundColor Cyan
-    Write-Host "Using Windows Defender as primary antivirus" -ForegroundColor Gray
+    # (No message needed - it's obvious from the settings displayed below)
 
     # Get Windows Defender preferences with error handling
     try {
@@ -436,7 +435,7 @@ function Get-FirewallStatus {
     #>
     param()
     
-    Write-SectionHeader "Firewall & network protection" "🔥"
+    Write-SectionHeader "Firewall & network protection" "📶"
     # Build a dictionary of active networks to display next to their profile status
     $activeNetworks = @{}
     try {
@@ -504,7 +503,7 @@ function Get-ReputationProtection {
     #>
     param()
 
-    Write-SectionHeader "App & browser control" "🌐"
+    Write-SectionHeader "Reputation-based protection" "✅"
     # Get MpPreference only if not using third-party AV
     $preferences = $null
     if ($script:RealTimeProtectionEnabled) {
@@ -515,8 +514,8 @@ function Get-ReputationProtection {
         }
     }
 
-    Write-Host "Reputation-based protection" -ForegroundColor Cyan
-    
+    # Write-Host "Reputation-based protection" -ForegroundColor Cyan
+
     # --- Start of logic from 'Check_Check apps and files.ps1' ---
     $policyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
     $policyProperty = "EnableSmartScreen"
@@ -568,6 +567,9 @@ function Get-ReputationProtection {
     Add-SecurityCheck -Category "App & Browser Control" -Name "Check apps and files" -IsEnabled $enabled -Severity "Warning" `
         -Remediation $remediation `
         -Details "SmartScreen checks downloads and apps for threats (Controlled by: $controlMethod)"
+
+    # Store Check apps and files status for dependency checks
+    $checkAppsAndFilesEnabled = $enabled
 
     # SmartScreen for Edge
     # --- Start of logic from 'Check_SmartScreen-W11.ps1' ---
@@ -660,14 +662,18 @@ function Get-ReputationProtection {
             -Details "Blocks potentially unwanted applications. Requires Real-time protection and SmartScreen for Edge"
     }
     # Don't display if Real-time Protection is disabled or SmartScreen for Edge is disabled
-    
-    $blockDownloads = Get-EdgePUABlockDownloadsEnabled
-    Write-StatusIcon $blockDownloads -Severity "Info"
-    Write-Host "Block potentially unwanted downloads" -ForegroundColor White
-    Add-SecurityCheck -Category "App & Browser Control" -Name "Block potentially unwanted downloads" -IsEnabled $blockDownloads -Severity "Info" `
-        -Remediation "Configure via Edge settings or Group Policy" `
-        -Details "Blocks downloads of potentially unwanted software"
-    
+
+    # Block potentially unwanted downloads - REQUIRES Check apps and files (only show if SmartScreen is enabled)
+    if ($checkAppsAndFilesEnabled) {
+        $blockDownloads = Get-EdgePUABlockDownloadsEnabled
+        Write-StatusIcon $blockDownloads -Severity "Info"
+        Write-Host "Block potentially unwanted downloads" -ForegroundColor White
+        Add-SecurityCheck -Category "App & Browser Control" -Name "Block potentially unwanted downloads" -IsEnabled $blockDownloads -Severity "Info" `
+            -Remediation "Configure via Edge settings or Group Policy" `
+            -Details "Blocks downloads of potentially unwanted software. Requires SmartScreen (Check apps and files)"
+    }
+    # Don't display if Check apps and files is disabled
+
     # SmartScreen for Store Apps
     $storeSmartScreen = Get-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\AppHost" -Name "EnableWebContentEvaluation" -DefaultValue 1
     $enabled = $storeSmartScreen -ne 0
@@ -732,7 +738,7 @@ function Get-CoreIsolationStatus {
     #>
     param()
     
-    Write-SectionHeader "Device security" "🔒"
+    Write-SectionHeader "Core isolation" "🔲"
     # Get MpPreference only if not using third-party AV
     $preferences = $null
     if ($script:RealTimeProtectionEnabled) {
@@ -743,7 +749,7 @@ function Get-CoreIsolationStatus {
         }
     }
 
-    Write-Host "Core isolation" -ForegroundColor Cyan
+    # Write-Host "Core isolation" -ForegroundColor Cyan
     # Memory Integrity
     $memIntegrity = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" -Name "Enabled" -DefaultValue 0
     $enabled = $memIntegrity -eq 1
@@ -762,7 +768,7 @@ function Get-CoreIsolationStatus {
         -Remediation "Requires compatible CPU and Windows 11 22H2+" `
         -Details "Hardware-based kernel stack protection"
 
-    Write-Host "Security processor" -ForegroundColor Cyan
+    # Write-Host "Security processor" -ForegroundColor Cyan
     # LSA Protection
     $lsaProtection = Get-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -DefaultValue 0
     $enabled = $lsaProtection -ge 1
@@ -818,63 +824,80 @@ function Get-ScanInformation {
         Retrieves and displays scan information
     #>
     param()
-    
-    Write-SectionHeader "Current threats" "⚠️"
 
     $status = Get-MpComputerStatus
     $now = Get-Date
 
-    # --- Last Quick Scan ---
+    # Calculate status colors for all items
+    $quickScanColor = "Red"
     $quickScanTime = $status.QuickScanStartTime
     if ($quickScanTime) {
         $quickScanAge = $now - $quickScanTime
         $quickScanColor = "Green"
         if ($quickScanAge.Days -ge 30) { $quickScanColor = "Red" }
         elseif ($quickScanAge.Days -ge 7) { $quickScanColor = "Yellow" }
-        
-        Write-Host "  Last quick scan:      " -NoNewline -ForegroundColor Gray
-        Write-Host "$($quickScanTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor $quickScanColor
-    } else {
-        Write-Host "  Last quick scan:      " -NoNewline -ForegroundColor Gray
-        Write-Host "N/A" -ForegroundColor Red
     }
-    
-    # --- Last Full Scan ---
+
+    $fullScanColor = "Red"
     $fullScanTime = $status.FullScanStartTime
     if ($fullScanTime) {
         $fullScanAge = $now - $fullScanTime
         $fullScanColor = "Green"
-        # Red if older than 1 year (approx 365 days)
         if ($fullScanAge.Days -ge 365) { $fullScanColor = "Red" }
-        # Yellow if older than 1 month (approx 30 days)
         elseif ($fullScanAge.Days -ge 30) { $fullScanColor = "Yellow" }
-        
-        Write-Host "  Last full scan:       " -NoNewline -ForegroundColor Gray
-        Write-Host "$($fullScanTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor $fullScanColor
-    } else {
-        Write-Host "  Last full scan:       " -NoNewline -ForegroundColor Gray
-        Write-Host "N/A" -ForegroundColor Red
     }
 
-    # --- Signature Version ---
-    Write-Host "  Signature version:    " -NoNewline -ForegroundColor Gray
-    Write-Host $status.AntivirusSignatureVersion -ForegroundColor White
-
-    # --- Last Updated (Full Timestamp) ---
+    $lastUpdateColor = "Red"
     $lastUpdatedTime = $status.AntivirusSignatureLastUpdated
     if ($lastUpdatedTime) {
         $lastUpdateAge = $now - $lastUpdatedTime
         $lastUpdateColor = "Green"
-        # Red if older than 1 month (approx 30 days)
         if ($lastUpdateAge.Days -ge 30) { $lastUpdateColor = "Red" }
-        # Yellow if older than 1 week (approx 7 days)
         elseif ($lastUpdateAge.Days -ge 7) { $lastUpdateColor = "Yellow" }
-        
-        Write-Host "  Last updated:         " -NoNewline -ForegroundColor Gray
-        Write-Host "$($lastUpdatedTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor $lastUpdateColor
+    }
+
+    # Check if all statuses are green
+    $allGreen = ($quickScanColor -eq "Green") -and ($fullScanColor -eq "Green") -and ($lastUpdateColor -eq "Green")
+
+    # Display condensed format if all green, otherwise show details
+    if ($allGreen) {
+        Write-Host "`n " -NoNewline
+        Write-Host "✓" -NoNewline -ForegroundColor Black -BackgroundColor Cyan
+        Write-Host "  Current threats: " -NoNewline -ForegroundColor White
+        Write-Host "None" -ForegroundColor Cyan
     } else {
-        Write-Host "  Last updated:         " -NoNewline -ForegroundColor Gray
-        Write-Host "N/A" -ForegroundColor Red
+        Write-SectionHeader "Current threats" "⚠️"
+
+        # --- Last Quick Scan ---
+        if ($quickScanTime) {
+            Write-Host "  Last quick scan:      " -NoNewline -ForegroundColor Gray
+            Write-Host "$($quickScanTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor $quickScanColor
+        } else {
+            Write-Host "  Last quick scan:      " -NoNewline -ForegroundColor Gray
+            Write-Host "N/A" -ForegroundColor Red
+        }
+
+        # --- Last Full Scan ---
+        if ($fullScanTime) {
+            Write-Host "  Last full scan:       " -NoNewline -ForegroundColor Gray
+            Write-Host "$($fullScanTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor $fullScanColor
+        } else {
+            Write-Host "  Last full scan:       " -NoNewline -ForegroundColor Gray
+            Write-Host "N/A" -ForegroundColor Red
+        }
+
+        # --- Signature Version ---
+        Write-Host "  Signature version:    " -NoNewline -ForegroundColor Gray
+        Write-Host $status.AntivirusSignatureVersion -ForegroundColor White
+
+        # --- Last Updated (Full Timestamp) ---
+        if ($lastUpdatedTime) {
+            Write-Host "  Last updated:         " -NoNewline -ForegroundColor Gray
+            Write-Host "$($lastUpdatedTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor $lastUpdateColor
+        } else {
+            Write-Host "  Last updated:         " -NoNewline -ForegroundColor Gray
+            Write-Host "N/A" -ForegroundColor Red
+        }
     }
 }
 
@@ -961,9 +984,6 @@ function Show-SecuritySummary {
     
     Write-Host "`n" -NoNewline
     Write-Host ("═" * 60) -ForegroundColor Blue
-    Write-Host "  SECURITY SCORE: " -NoNewline -ForegroundColor Gray
-    Write-Host "$score/100" -NoNewline -ForegroundColor $scoreColor
-    Write-Host "  [$scoreRating]" -ForegroundColor $scoreColor
     Write-Host "  ✓ $enabled Enabled" -NoNewline -ForegroundColor Green
     Write-Host "  ✗ $disabled Disabled" -NoNewline -ForegroundColor $(if ($disabled -gt 0) { "Yellow" } else { "Green" })
     if ($critical -gt 0) {
@@ -972,9 +992,12 @@ function Show-SecuritySummary {
         Write-Host ""
     }
     Write-Host ("═" * 60) -ForegroundColor Blue
-    
-    # Updated Warning Text
-    Write-Host "  *NOTE: Phishing protection for Edge must be manually set!" -ForegroundColor Yellow
+
+    # Updated Warning Text - only show if there are disabled settings
+    $disabledCount = ($script:SecurityChecks | Where-Object { !$_.IsEnabled }).Count
+    if ($disabledCount -gt 0) {
+        Write-Host "  *NOTE: Phishing protection for Edge must be manually set!" -ForegroundColor Yellow
+    }
 
     # --- Interactive Menu (COMMENTED OUT) ---
     <#
@@ -1544,8 +1567,6 @@ function Invoke-ApplySecuritySettings {
     $disabledChecks = $script:SecurityChecks | Where-Object { !$_.IsEnabled }
 
     if ($disabledChecks.Count -eq 0) {
-        Write-Host "`n✓ All security features are already enabled!" -ForegroundColor Green
-        Write-Host "  No settings need to be applied." -ForegroundColor Gray
         return
     }
 
@@ -1553,11 +1574,10 @@ function Invoke-ApplySecuritySettings {
     Write-Host ("═" * 60) -ForegroundColor Blue
     Write-Host "  APPLY RECOMMENDED SETTINGS" -ForegroundColor White
     Write-Host ("═" * 60) -ForegroundColor Blue
-
-    Write-Host "`n  Found " -NoNewline -ForegroundColor White
+    Write-Host "  Found " -NoNewline -ForegroundColor White
     Write-Host "$($disabledChecks.Count)" -NoNewline -ForegroundColor Yellow
     Write-Host " disabled security feature(s)" -ForegroundColor White
-    Write-Host "`n  Would you like to apply recommended settings?" -ForegroundColor Cyan
+    Write-Host "  Would you like to apply recommended settings?" -ForegroundColor Cyan
 
     # Interactive Menu
     $selectedOption = 0 # 0 = Yes, 1 = No
@@ -1720,6 +1740,126 @@ function Enable-TamperProtection {
         Write-Host " ERROR" -ForegroundColor Red
         Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
         Write-Host "    Please enable Tamper Protection manually via Windows Security" -ForegroundColor Gray
+        return $false
+    }
+}
+
+function Enable-CloudDeliveredProtection {
+    <#
+    .SYNOPSIS
+        Enables Cloud-delivered protection (MAPS)
+    .DESCRIPTION
+        Enables Microsoft Active Protection Service (MAPS) cloud-based protection.
+        Provides faster threat response through cloud-based analysis.
+        Requires Tamper Protection to be disabled for programmatic changes.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Cloud-delivered protection..." -ForegroundColor Cyan -NoNewline
+
+        # Check Tamper Protection via registry
+        $tamperProtection = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features" -Name "TamperProtection" -ErrorAction SilentlyContinue
+
+        if ($tamperProtection.TamperProtection -eq 5) {
+            Write-Host " BLOCKED" -ForegroundColor Red
+            Write-Host "    ⚠️  Tamper Protection is ENABLED and blocking changes." -ForegroundColor Yellow
+            Write-Host "    To enable Cloud-delivered protection:" -ForegroundColor Gray
+            Write-Host "      1. Open Windows Security" -ForegroundColor Gray
+            Write-Host "      2. Go to: Virus & threat protection > Manage settings" -ForegroundColor Gray
+            Write-Host "      3. Turn OFF 'Tamper Protection' temporarily" -ForegroundColor Gray
+            Write-Host "      4. Run this script again" -ForegroundColor Gray
+            Write-Host "      5. Re-enable Tamper Protection afterwards" -ForegroundColor Gray
+            return $false
+        }
+
+        # Check current status
+        $currentStatus = Get-MpPreference | Select-Object -ExpandProperty MAPSReporting -ErrorAction SilentlyContinue
+        if ($currentStatus -ne 0) {
+            Write-Host " ALREADY ENABLED" -ForegroundColor Green
+            return $true
+        }
+
+        # Enable Cloud-delivered protection (Advanced level = 2)
+        Set-MpPreference -MAPSReporting Advanced -ErrorAction Stop
+
+        Start-Sleep -Seconds 1
+
+        # Verify the setting
+        $status = Get-MpPreference | Select-Object -ExpandProperty MAPSReporting
+
+        if ($status -ne 0) {
+            Write-Host " ENABLED" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  May be blocked by Group Policy or other restrictions" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
+        return $false
+    }
+}
+
+function Enable-AutomaticSampleSubmission {
+    <#
+    .SYNOPSIS
+        Enables Automatic sample submission
+    .DESCRIPTION
+        Enables automatic submission of suspicious files to Microsoft for analysis.
+        Helps improve threat detection and response times.
+        Requires Tamper Protection to be disabled for programmatic changes.
+    #>
+    param()
+
+    try {
+        Write-Host "`n  • Automatic sample submission..." -ForegroundColor Cyan -NoNewline
+
+        # Check Tamper Protection via registry
+        $tamperProtection = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows Defender\Features" -Name "TamperProtection" -ErrorAction SilentlyContinue
+
+        if ($tamperProtection.TamperProtection -eq 5) {
+            Write-Host " BLOCKED" -ForegroundColor Red
+            Write-Host "    ⚠️  Tamper Protection is ENABLED and blocking changes." -ForegroundColor Yellow
+            Write-Host "    To enable Automatic sample submission:" -ForegroundColor Gray
+            Write-Host "      1. Open Windows Security" -ForegroundColor Gray
+            Write-Host "      2. Go to: Virus & threat protection > Manage settings" -ForegroundColor Gray
+            Write-Host "      3. Turn OFF 'Tamper Protection' temporarily" -ForegroundColor Gray
+            Write-Host "      4. Run this script again" -ForegroundColor Gray
+            Write-Host "      5. Re-enable Tamper Protection afterwards" -ForegroundColor Gray
+            return $false
+        }
+
+        # Check current status
+        $currentStatus = Get-MpPreference | Select-Object -ExpandProperty SubmitSamplesConsent -ErrorAction SilentlyContinue
+        if ($currentStatus -ne 0) {
+            Write-Host " ALREADY ENABLED" -ForegroundColor Green
+            return $true
+        }
+
+        # Enable Automatic sample submission (SendAllSamples = 3)
+        Set-MpPreference -SubmitSamplesConsent SendAllSamples -ErrorAction Stop
+
+        Start-Sleep -Seconds 1
+
+        # Verify the setting
+        $status = Get-MpPreference | Select-Object -ExpandProperty SubmitSamplesConsent
+
+        if ($status -ne 0) {
+            Write-Host " ENABLED" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host " FAILED" -ForegroundColor Red
+            Write-Host "    ⚠️  May be blocked by Group Policy or other restrictions" -ForegroundColor Yellow
+            return $false
+        }
+
+    } catch {
+        Write-Host " ERROR" -ForegroundColor Red
+        Write-Host "    ⚠️  $($_.Exception.Message)" -ForegroundColor Yellow
         return $false
     }
 }
@@ -2435,6 +2575,22 @@ function Apply-SecuritySettings {
                 }
             }
 
+            "Cloud-delivered protection" {
+                if (Enable-CloudDeliveredProtection) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
+            "Automatic sample submission" {
+                if (Enable-AutomaticSampleSubmission) {
+                    $settingsApplied++
+                } else {
+                    $settingsFailed++
+                }
+            }
+
             "Controlled folder access" {
                 if (Enable-ControlledFolderAccess) {
                     $settingsApplied++
@@ -2532,7 +2688,6 @@ try {
     Clear-Host
     
     Write-Host "`n" -NoNewline
-    Write-Host ("═" * 60) -ForegroundColor Blue
     Write-Host "  WINDOWS SECURITY STATUS REPORT" -ForegroundColor White
     Write-Host ("═" * 60) -ForegroundColor Blue
 
@@ -2582,20 +2737,99 @@ try {
         Compare-ToBaseline -BaselinePath $CompareToBaseline
     }
     
+    # Additional Options Menu
+    Write-Host "`n"
+    Write-Host "  ADDITIONAL OPTIONS" -ForegroundColor Cyan
+    Write-Host ("═" * 60) -ForegroundColor Blue
+    Write-Host "  [R] Restart Windows Security" -ForegroundColor White
+    Write-Host "      (Useful after applying security settings)" -ForegroundColor Gray
+    Write-Host "  [P] Open Phishing protection for Edge" -ForegroundColor White
+    Write-Host "      (Opens App & browser control)" -ForegroundColor Gray
+    Write-Host "  Press 'R' or 'P' to select an option, or any other key to skip..." -ForegroundColor Yellow -NoNewline
+
+    $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    Write-Host ""
+
+    # Handle Restart Windows Security
+    if ($key.Character -eq 'R' -or $key.Character -eq 'r') {
+        Write-Host "  Restarting Windows Security..." -ForegroundColor Cyan
+
+        # Stop Windows Security processes
+        $processNames = @('SecurityHealthSystray', 'SecHealthUI')
+        $stoppedCount = 0
+
+        foreach ($processName in $processNames) {
+            try {
+                $processes = Get-Process -Name $processName -ErrorAction SilentlyContinue
+                if ($processes) {
+                    $processes | Stop-Process -Force -ErrorAction Stop
+                    $stoppedCount++
+                    Write-Host "  ✓ Stopped: $processName" -ForegroundColor Green
+                }
+            }
+            catch {
+                Write-Host "  ⚠️  Could not stop: $processName" -ForegroundColor Yellow
+            }
+        }
+
+        if ($stoppedCount -gt 0) {
+            Start-Sleep -Seconds 2
+        }
+
+        # Restart Windows Security
+        try {
+            Start-Process "windowsdefender:" -ErrorAction Stop
+            Start-Sleep -Seconds 2
+            Write-Host "  ✓ Windows Security restarted successfully" -ForegroundColor Green
+        }
+        catch {
+            Write-Host "  ⚠️  Could not restart Windows Security automatically" -ForegroundColor Yellow
+            Write-Host "     You can open it manually from the Start menu" -ForegroundColor Gray
+        }
+    }
+    # Handle Open Phishing Protection
+    elseif ($key.Character -eq 'P' -or $key.Character -eq 'p') {
+        Write-Host "  Opening Phishing protection settings..." -ForegroundColor Cyan
+
+        try {
+            # Open Windows Security to App & browser control page
+            Start-Process -FilePath "windowsdefender://appbrowser" -ErrorAction Stop
+
+            # Wait for the app to open
+            Start-Sleep -Seconds 2
+
+            # Attempt to send keystrokes to navigate to Reputation-based protection
+            $wshell = New-Object -ComObject WScript.Shell
+            $activated = $wshell.AppActivate("Windows Security")
+
+            if ($activated) {
+                Start-Sleep -Milliseconds 500
+                $wshell.SendKeys("{TAB 2}")
+            }
+
+            Write-Host "  ✓ Windows Security opened to App & browser control" -ForegroundColor Green
+            Write-Host "Navigate to: Reputation-based protection > Phishing protection" -ForegroundColor Gray
+        }
+        catch {
+            Write-Host "  ⚠️  Could not open Windows Security automatically" -ForegroundColor Yellow
+            Write-Host "     Open Windows Security manually and navigate to:" -ForegroundColor Gray
+            Write-Host "     App & browser control > Reputation-based protection > Phishing protection" -ForegroundColor Gray
+        }
+    }
+    # Skip
+    else {
+        Write-Host "  No additional options selected" -ForegroundColor Gray
+    }
+
     # Footer
-    # Removed: Elapsed time calculation
     Write-Host "`n" -NoNewline
     Write-Host ("─" * 60) -ForegroundColor DarkGray
-    
-    # Removed: Display scan time
-    
     # Set the timestamp this script was last edited
     $lastEditedTimestamp = "2025-11-14"
-    Write-Host "  Last Edited: $lastEditedTimestamp" -ForegroundColor Green
-    Write-Host "  www.AIIT.support All rights reserved" -ForegroundColor Green
+    Write-Host "  Last Edited: $lastEditedTimestamp" -NoNewline -ForegroundColor Gray
+    Write-Host "     www.AIIT.support" -ForegroundColor Gray
     Write-Host ("─" * 60) -ForegroundColor DarkGray
-    Write-Host ""
-    
+
 } catch {
     Write-Host "`n[ERROR] " -NoNewline -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor White
