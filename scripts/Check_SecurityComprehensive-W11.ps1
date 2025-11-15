@@ -2838,11 +2838,15 @@ try {
 
             if ($activated) {
                 Start-Sleep -Milliseconds 500
+                # Press Tab twice to navigate to Reputation-based protection
                 $wshell.SendKeys("{TAB 2}")
+                Start-Sleep -Milliseconds 300
+                # Press Enter to open it
+                $wshell.SendKeys("{ENTER}")
             }
 
-            Write-Host "  ✓ Opened Windows Security" -ForegroundColor Green
-            Write-Host "  Navigate to: Reputation-based protection > Phishing protection" -ForegroundColor Gray
+            Write-Host "  ✓ Opened Phishing protection settings" -ForegroundColor Green
+            Write-Host "  Go to Reputation-based protection > Phishing protection"
         }
         catch {
             Write-Host "  ⚠️  Could not open Windows Security automatically" -ForegroundColor Yellow
