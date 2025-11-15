@@ -362,23 +362,16 @@ function Get-DefenderStatus {
             -Details "Unable to determine status"
     }
 
-    # Controlled Folder Access - REQUIRES Real-time Protection
-    $cfaEnabled = $preferences.EnableControlledFolderAccess -eq 1
-    if (!$script:RealTimeProtectionEnabled) {
-        # If Real-time Protection is off, Controlled Folder Access cannot work
-        Write-StatusIcon $false -Severity "Warning"
-        Write-Host "Controlled folder access " -NoNewline -ForegroundColor White
-        Write-Host "(inactive - requires Real-time protection)" -ForegroundColor DarkGray
-        Add-SecurityCheck -Category "Virus & Threat Protection" -Name "Controlled folder access" -IsEnabled $false -Severity "Warning" `
-            -Remediation "First enable Real-time protection, then: Set-MpPreference -EnableControlledFolderAccess Enabled" `
-            -Details "Protects important folders from ransomware. REQUIRES Real-time protection to function"
-    } else {
+    # Controlled Folder Access - REQUIRES Real-time Protection (only show if RT protection is enabled)
+    if ($script:RealTimeProtectionEnabled) {
+        $cfaEnabled = $preferences.EnableControlledFolderAccess -eq 1
         Write-StatusIcon $cfaEnabled -Severity "Warning"
         Write-Host "Controlled folder access" -ForegroundColor White
         Add-SecurityCheck -Category "Virus & Threat Protection" -Name "Controlled folder access" -IsEnabled $cfaEnabled -Severity "Warning" `
             -Remediation "Set-MpPreference -EnableControlledFolderAccess Enabled" `
             -Details "Protects important folders from ransomware. Requires Real-time protection"
     }
+    # Don't display if Real-time Protection is disabled
     
     # Removed: The "Advanced protection" header and "Behavior monitoring" check.
 }
@@ -650,17 +643,23 @@ function Get-ReputationProtection {
         -Remediation $remediation `
         -Details "SmartScreen protection in Microsoft Edge browser (Controlled by: $controlMethod)"
 
-    # PUA Protection
-    $enabled = $false
-    if ($preferences) {
-        $enabled = $preferences.PUAProtection -eq 1
+    # Store SmartScreen Edge status for PUA dependency check
+    $smartScreenEdgeEnabled = $enabled
+
+    # PUA Protection - REQUIRES Real-time Protection (only show if RT protection is enabled)
+    if ($script:RealTimeProtectionEnabled -and $smartScreenEdgeEnabled) {
+        $enabled = $false
+        if ($preferences) {
+            $enabled = $preferences.PUAProtection -eq 1
+        }
+        Write-StatusIcon $enabled -Severity "Warning"
+        Write-Host "Block potentially unwanted apps" -ForegroundColor White
+        $remediation = "Set-MpPreference -PUAProtection Enabled"
+        Add-SecurityCheck -Category "App & Browser Control" -Name "Block potentially unwanted apps" -IsEnabled $enabled -Severity "Warning" `
+            -Remediation $remediation `
+            -Details "Blocks potentially unwanted applications. Requires Real-time protection and SmartScreen for Edge"
     }
-    Write-StatusIcon $enabled -Severity "Warning"
-    Write-Host "Block potentially unwanted apps" -ForegroundColor White
-    $remediation = if ($script:RealTimeProtectionEnabled) { "Set-MpPreference -PUAProtection Enabled" } else { "N/A - Managed by third-party antivirus" }
-    Add-SecurityCheck -Category "App & Browser Control" -Name "Block potentially unwanted apps" -IsEnabled $enabled -Severity "Warning" `
-        -Remediation $remediation `
-        -Details "Blocks potentially unwanted applications"
+    # Don't display if Real-time Protection is disabled or SmartScreen for Edge is disabled
     
     $blockDownloads = Get-EdgePUABlockDownloadsEnabled
     Write-StatusIcon $blockDownloads -Severity "Info"
@@ -820,14 +819,7 @@ function Get-ScanInformation {
     #>
     param()
     
-    Write-SectionHeader "Scan information" "🔍"
-    # Check if third-party antivirus is managing protection
-    if (!$script:RealTimeProtectionEnabled) {
-        Write-Host "  ℹ️  " -NoNewline -ForegroundColor Cyan
-        Write-Host "Managed by third-party software" -ForegroundColor White
-        Write-Host "    Scan information not available (third-party antivirus active)" -ForegroundColor Gray
-        return
-    }
+    Write-SectionHeader "Current threats" "⚠️"
 
     $status = Get-MpComputerStatus
     $now = Get-Date
@@ -2550,7 +2542,11 @@ try {
     Get-FirewallStatus
     Get-ReputationProtection
     Get-CoreIsolationStatus
-    Get-ScanInformation
+
+    # Only show Current threats section if Real-time protection is enabled
+    if ($script:RealTimeProtectionEnabled) {
+        Get-ScanInformation
+    }
     
     # Show summary
     Show-SecuritySummary
@@ -2608,3 +2604,4 @@ try {
     Write-Host $_.ScriptStackTrace -ForegroundColor Gray
     exit 1
 }
+
